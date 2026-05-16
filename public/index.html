@@ -1,0 +1,1628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Diva's Birthday Balloon Pop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Inter:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ============ DIVA'S BIRTHDAY BALLOON POP (VIP edition) ============
+     Always-on stream widget. Chat pops balloons by color, scores tracked,
+     leaderboard toggles via backtick. Sub/bits/Blerp events spawn VIP
+     balloons that hover at the top of the screen with the chatter's name
+     until popped. !birthday triggers a confetti celebration.
+
+     Config: see CONFIG block at top of <script>.
+     OBS: enable "Interact" on the browser source for backtick + key tests.
+  ======================================================================= */
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Fredoka One', cursive;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #stage { position: fixed; inset: 0; pointer-events: none; }
+
+  /* ============ BALLOON (base) ============ */
+  .balloon {
+    position: absolute;
+    width: 70px;
+    height: 90px;
+    bottom: -120px;
+    will-change: transform;
+    animation:
+      balloonRise var(--rise-dur, 18s) linear forwards,
+      balloonSway var(--sway-dur, 3s) ease-in-out infinite alternate;
+  }
+
+  .balloon-body {
+    position: absolute;
+    inset: 0 0 14px 0;
+    border-radius: 50% 50% 48% 48% / 55% 55% 45% 45%;
+    background: radial-gradient(circle at 30% 30%, var(--highlight), var(--color) 60%, var(--shadow) 100%);
+    box-shadow:
+      inset -6px -6px 12px rgba(0,0,0,0.15),
+      0 4px 8px rgba(0,0,0,0.2);
+  }
+  .balloon-knot {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--shadow);
+  }
+  .balloon-string {
+    position: absolute;
+    bottom: -42px;
+    left: 50%;
+    width: 1.5px;
+    height: 44px;
+    background: rgba(255,255,255,0.5);
+    transform: translateX(-50%);
+  }
+
+  @keyframes balloonRise {
+    from { transform: translateY(0); }
+    to { transform: translateY(calc(-100vh - 200px)); }
+  }
+  @keyframes balloonSway {
+    from { margin-left: -10px; }
+    to { margin-left: 10px; }
+  }
+
+  /* ============ VIP BALLOON ============ */
+  .balloon.vip {
+    animation: vipFloat 4s ease-in-out infinite alternate;
+    bottom: auto;
+    filter: drop-shadow(0 0 16px rgba(255, 215, 0, 0.55));
+    transition:
+      top 7s cubic-bezier(0.4, 0, 0.6, 1),
+      left 7s cubic-bezier(0.4, 0, 0.6, 1);
+  }
+  /* Gentle constant float while wandering */
+  @keyframes vipFloat {
+    from { transform: translateY(-4px) rotate(-1.5deg); }
+    to   { transform: translateY(4px) rotate(1.5deg); }
+  }
+  .balloon.vip .balloon-body {
+    box-shadow:
+      inset -6px -6px 12px rgba(0,0,0,0.15),
+      0 4px 8px rgba(0,0,0,0.2),
+      0 0 24px rgba(255, 215, 0, 0.45);
+  }
+  .balloon.vip::before {
+    content: "✨";
+    position: absolute;
+    top: -8px;
+    left: -16px;
+    font-size: 18px;
+    animation: sparkle 2.2s ease-in-out infinite;
+  }
+  .balloon.vip::after {
+    content: "✨";
+    position: absolute;
+    top: 10px;
+    right: -14px;
+    font-size: 16px;
+    animation: sparkle 2.6s 0.4s ease-in-out infinite;
+  }
+  @keyframes sparkle {
+    0%, 100% { opacity: 0.3; transform: scale(0.7) rotate(0deg); }
+    50% { opacity: 1; transform: scale(1.2) rotate(180deg); }
+  }
+
+  .balloon.vip-regular { width: 70px; height: 90px; }
+  .balloon.vip-medium { width: 105px; height: 135px; }
+  .balloon.vip-big { width: 145px; height: 185px; }
+
+  .balloon.vip-medium { filter: drop-shadow(0 0 22px rgba(255, 200, 50, 0.7)); }
+  .balloon.vip-big {
+    filter: drop-shadow(0 0 32px rgba(255, 215, 0, 0.85)) drop-shadow(0 0 18px rgba(255, 140, 200, 0.6));
+  }
+  .balloon.vip-big::before, .balloon.vip-medium::before { font-size: 22px; }
+  .balloon.vip-big::after, .balloon.vip-medium::after { font-size: 20px; }
+
+  .balloon-tag {
+    position: absolute;
+    top: calc(100% + 48px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #fff8e8 0%, #ffe6f0 100%);
+    border: 2px solid #d4a574;
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    color: #4a2c1a;
+    white-space: nowrap;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+    pointer-events: none;
+  }
+  .balloon.vip-medium .balloon-tag { font-size: 14px; padding: 6px 14px; }
+  .balloon.vip-big .balloon-tag { font-size: 16px; padding: 7px 16px; }
+  .balloon-tag .event-icon { margin-right: 5px; }
+  .balloon-tag .event-amount {
+    margin-left: 6px;
+    color: #d4699a;
+    font-weight: 800;
+  }
+
+  /* (vipRise and vipBob removed — VIPs now wander via JS top/left transitions) */
+
+  /* ============ FLAIR (random themed phrases) ============ */
+  .flair {
+    position: fixed;
+    font-family: 'Fredoka One', cursive;
+    font-size: clamp(38px, 5.5vw, 64px);
+    color: #ff6b9d;
+    text-shadow:
+      3px 3px 0 #fff,
+      6px 6px 0 #ffd700,
+      0 0 30px rgba(255, 192, 203, 0.6),
+      0 0 60px rgba(255, 215, 0, 0.4);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 30;
+    letter-spacing: 1px;
+    animation: flairLife 4.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+
+  /* Single composite animation: bouncy entrance → gentle hold → drift-up exit */
+  @keyframes flairLife {
+    0%   { transform: translate(-50%, -50%) scale(0)    rotate(-15deg); opacity: 0; }
+    10%  { transform: translate(-50%, -50%) scale(1.18) rotate(6deg);   opacity: 1; }
+    16%  { transform: translate(-50%, -50%) scale(0.96) rotate(-3deg);  opacity: 1; }
+    22%  { transform: translate(-50%, -50%) scale(1)    rotate(0deg);   opacity: 1; }
+    78%  { transform: translate(-50%, -50%) scale(1)    rotate(0deg);   opacity: 1; }
+    100% { transform: translate(-50%, -50%) translateY(-50px) scale(0.92) rotate(3deg); opacity: 0; }
+  }
+
+  /* Sparkle decorations that twinkle around the flair text */
+  .flair-sparkle {
+    position: fixed;
+    font-size: 28px;
+    pointer-events: none;
+    z-index: 29;
+    animation: flairSparkle 2s ease-in-out forwards;
+  }
+  @keyframes flairSparkle {
+    0%   { transform: scale(0)   rotate(0deg);   opacity: 0; }
+    20%  { transform: scale(1.4) rotate(180deg); opacity: 1; }
+    50%  { transform: scale(1)   rotate(360deg); opacity: 1; }
+    100% { transform: scale(0)   rotate(540deg); opacity: 0; }
+  }
+  .balloon.popping { animation: none !important; }
+  .balloon.popping .balloon-body,
+  .balloon.popping .balloon-knot,
+  .balloon.popping .balloon-string,
+  .balloon.popping .balloon-tag {
+    animation: popShrink 0.6s cubic-bezier(0.5, 0, 0.5, 1) forwards;
+    transform-origin: center center;
+  }
+  @keyframes popShrink {
+    0%   { transform: scale(1);    opacity: 1; }
+    20%  { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(0);    opacity: 0; }
+  }
+
+  .pop-credit {
+    position: fixed;
+    font-family: 'Fredoka One', cursive;
+    color: #fff;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.4), 0 0 12px rgba(255,255,255,0.5);
+    font-size: 22px;
+    pointer-events: none;
+    animation: creditFloat 1.6s ease-out forwards;
+    white-space: nowrap;
+    text-align: center;
+  }
+  .pop-credit .plus { color: #ffd84a; margin-left: 6px; }
+  .pop-credit.vip-pop {
+    font-size: 30px;
+    color: #ffd700;
+    text-shadow: 3px 3px 0 #d4699a, 0 0 20px rgba(255, 215, 0, 0.8);
+  }
+  .pop-credit.vip-pop .plus { color: #fff; }
+  @keyframes creditFloat {
+    0% { transform: translate(-50%, 0); opacity: 0; }
+    20% { transform: translate(-50%, -10px); opacity: 1; }
+    100% { transform: translate(-50%, -100px); opacity: 0; }
+  }
+
+  .pop-particle {
+    position: fixed;
+    width: 8px;
+    height: 12px;
+    pointer-events: none;
+    will-change: transform, opacity;
+  }
+  @keyframes particleBurst {
+    0% { transform: translate(0,0) rotate(0deg); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); opacity: 0; }
+  }
+
+  /* ============ POP STREAK COUNTER ============ */
+  .streak-counter {
+    position: fixed;
+    top: 30px;
+    right: 30px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Fredoka One', cursive;
+    font-size: 26px;
+    color: #fff;
+    background: linear-gradient(135deg, #ff6b9d 0%, #ff9ec7 100%);
+    border: 3px solid #ffd700;
+    border-radius: 16px;
+    padding: 10px 20px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+    z-index: 35;
+    opacity: 0;
+    transform: scale(0.6) translateX(20px);
+    transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    pointer-events: none;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.2);
+  }
+  .streak-counter.visible {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+  }
+  .streak-counter.tier-high {
+    font-size: 32px;
+    background: linear-gradient(135deg, #ff5e3a 0%, #ff9b3a 50%, #ffd84a 100%);
+    border-color: #fff;
+    box-shadow: 0 6px 24px rgba(255, 120, 50, 0.5), 0 0 30px rgba(255, 200, 80, 0.4);
+  }
+  .streak-counter.tier-legendary {
+    font-size: 38px;
+    background: linear-gradient(135deg, #b48dff 0%, #ff6b9d 50%, #ffd700 100%);
+    border-color: #fff;
+    box-shadow: 0 6px 28px rgba(180, 140, 255, 0.6), 0 0 40px rgba(255, 215, 0, 0.5);
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.2), 0 0 16px rgba(255,255,255,0.8);
+  }
+  .streak-counter.pulse {
+    animation: streakPulse 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes streakPulse {
+    0%   { transform: scale(1) translateX(0); }
+    40%  { transform: scale(1.18) translateX(0); }
+    100% { transform: scale(1) translateX(0); }
+  }
+  .streak-fire {
+    display: inline-block;
+    animation: fireFlicker 0.55s ease-in-out infinite alternate;
+  }
+  @keyframes fireFlicker {
+    from { transform: scale(0.92) rotate(-4deg); }
+    to   { transform: scale(1.08) rotate(4deg); }
+  }
+  .streak-name {
+    color: #fff5e6;
+    margin-right: 4px;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.3), 0 0 14px rgba(255, 255, 255, 0.5);
+  }
+
+  /* Broken streak state — overrides all tier styling when streak is shattered */
+  .streak-counter.broken {
+    background: linear-gradient(135deg, #4a2c3a 0%, #6b3a4f 50%, #3a2a3a 100%) !important;
+    border-color: #ff5e7a !important;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 30px rgba(255, 94, 122, 0.3) !important;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.5) !important;
+    animation: streakShake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) !important;
+  }
+  .streak-counter.broken .streak-fire {
+    animation: none;
+    filter: saturate(0.5);
+  }
+  .streak-counter.broken .streak-name {
+    color: #ffb3c0;
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 94, 122, 0.7);
+    text-decoration-thickness: 2px;
+  }
+  .streak-broken-by {
+    display: block;
+    font-size: 0.55em;
+    color: #fff;
+    opacity: 0.9;
+    margin-top: 4px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+  }
+  @keyframes streakShake {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    10% { transform: translateX(-10px) rotate(-3deg); }
+    20% { transform: translateX(10px) rotate(3deg); }
+    30% { transform: translateX(-8px) rotate(-2deg); }
+    40% { transform: translateX(8px) rotate(2deg); }
+    50% { transform: translateX(-6px) rotate(-1deg); }
+    60% { transform: translateX(6px) rotate(1deg); }
+    70% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+    90% { transform: translateX(-2px); }
+  }
+
+  /* ============ BIRTHDAY ALERT ============ */
+  .bday-banner {
+    position: fixed;
+    left: 50%;
+    top: 35%;
+    transform: translate(-50%, -50%) scale(0);
+    padding: 24px 56px;
+    background: linear-gradient(135deg, #fff5e6 0%, #ffd6e8 50%, #fff5e6 100%);
+    border: 5px solid #ffd700;
+    border-radius: 22px;
+    box-shadow:
+      0 0 0 4px #fff,
+      0 0 0 8px #d4699a,
+      0 24px 60px rgba(0,0,0,0.4),
+      inset 0 0 40px rgba(255,215,0,0.2);
+    text-align: center;
+    pointer-events: none;
+    z-index: 50;
+    animation:
+      bannerIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+      bannerOut 0.5s 3.8s ease-in forwards;
+  }
+  .bday-banner-title {
+    font-family: 'Fredoka One', cursive;
+    color: #d4699a;
+    font-size: 44px;
+    text-shadow: 3px 3px 0 #fff, 4px 4px 0 #ffd700;
+    line-height: 1.1;
+  }
+  .bday-banner-sub {
+    margin-top: 6px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    color: #6b3f5a;
+    font-size: 16px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  @keyframes bannerIn {
+    from { transform: translate(-50%, -50%) scale(0) rotate(-12deg); opacity: 0; }
+    to { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
+  }
+  @keyframes bannerOut {
+    to { transform: translate(-50%, -50%) scale(0.9); opacity: 0; }
+  }
+
+  /* ============ LEADERBOARD (CAKE PODIUM) ============ */
+  #leaderboard {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(30,15,40,0.85) 0%, rgba(20,10,30,0.95) 100%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+    z-index: 100;
+  }
+  #leaderboard.open { opacity: 1; pointer-events: auto; }
+
+  .leaderboard-header {
+    position: absolute;
+    top: 6%;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+  }
+  .leaderboard-title {
+    font-family: 'Fredoka One', cursive;
+    font-size: 56px;
+    color: #fff;
+    text-shadow: 4px 4px 0 #d4699a, 8px 8px 0 #6b3a4f, 0 0 30px rgba(255, 192, 203, 0.6);
+    letter-spacing: 2px;
+  }
+  .leaderboard-sub {
+    margin-top: 4px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    color: #ffd700;
+    font-size: 14px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+  }
+
+  .cake {
+    position: relative;
+    margin-top: 70px;
+    width: 720px;
+    max-width: 92vw;
+    filter: drop-shadow(0 30px 50px rgba(0,0,0,0.5));
+  }
+
+  .tier {
+    position: relative;
+    margin: 0 auto;
+    border-radius: 14px 14px 8px 8px;
+    background: linear-gradient(180deg, #fff5e6 0%, #ffe1d6 100%);
+    border: 4px solid #d4a574;
+    box-shadow: inset 0 -8px 0 rgba(180,120,90,0.25);
+  }
+  .tier::before {
+    content: "";
+    position: absolute;
+    top: -10px;
+    left: -4px;
+    right: -4px;
+    height: 28px;
+    background:
+      radial-gradient(circle at 10% 100%, #ff9ec7 12px, transparent 13px),
+      radial-gradient(circle at 25% 100%, #ff9ec7 10px, transparent 11px),
+      radial-gradient(circle at 40% 100%, #ff9ec7 14px, transparent 15px),
+      radial-gradient(circle at 55% 100%, #ff9ec7 11px, transparent 12px),
+      radial-gradient(circle at 70% 100%, #ff9ec7 13px, transparent 14px),
+      radial-gradient(circle at 85% 100%, #ff9ec7 10px, transparent 11px),
+      linear-gradient(180deg, #ffb3d9 0%, #ff9ec7 50%, transparent 50%);
+    border-radius: 12px 12px 0 0;
+  }
+  .tier .sprinkle {
+    position: absolute;
+    width: 4px;
+    height: 10px;
+    border-radius: 2px;
+    transform: rotate(var(--rot, 20deg));
+  }
+
+  .tier-top { width: 38%; height: 130px; z-index: 3; }
+  .tier-mid { width: 64%; height: 130px; margin-top: -6px; z-index: 2; }
+  .tier-bottom { width: 100%; height: 150px; margin-top: -6px; z-index: 1; }
+
+  .cake-text {
+    position: absolute;
+    bottom: 26px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'Fredoka One', cursive;
+    color: #ff6b9d;
+    font-size: 26px;
+    text-shadow:
+      -1px -1px 0 #fff, 1px -1px 0 #fff,
+      -1px 1px 0 #fff, 1px 1px 0 #fff,
+      3px 3px 0 rgba(212, 105, 154, 0.4);
+    letter-spacing: 2px;
+  }
+
+  .candles-row {
+    position: absolute;
+    top: -50px;
+    left: 0; right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 22px;
+  }
+  .tier-bottom .candles-row { gap: 14px; padding: 0 30px; }
+
+  .candle {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: transform 0.3s ease;
+  }
+  .candle-stick {
+    width: 12px;
+    height: 50px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--candle-light) 0%, var(--candle-dark) 70%);
+    box-shadow: inset -2px 0 0 rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.1);
+    position: relative;
+  }
+  .candle-stick::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent 0, transparent 8px,
+      rgba(255,255,255,0.3) 8px, rgba(255,255,255,0.3) 9px);
+    border-radius: 2px;
+  }
+  .candle-wick {
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px; height: 6px;
+    background: #2a1810;
+  }
+  .candle-flame {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-2px);
+    width: 14px; height: 22px;
+    background: radial-gradient(ellipse at center bottom, #fff5b0 0%, #ffd84a 30%, #ff9b3a 70%, #ff5e3a 100%);
+    border-radius: 50% 50% 30% 30% / 60% 60% 40% 40%;
+    box-shadow: 0 0 20px rgba(255, 180, 80, 0.7), 0 0 40px rgba(255, 120, 50, 0.4);
+    animation: flicker 0.6s ease-in-out infinite alternate;
+  }
+  @keyframes flicker {
+    from { transform: translateX(-50%) translateY(-2px) scale(1) rotate(-2deg); }
+    to { transform: translateX(-50%) translateY(-3px) scale(1.08) rotate(2deg); }
+  }
+
+  .candle.first .candle-flame {
+    width: 22px; height: 36px;
+    box-shadow: 0 0 30px rgba(255, 200, 80, 0.9), 0 0 60px rgba(255, 140, 50, 0.6);
+  }
+  .candle.first .candle-stick { width: 16px; height: 70px; }
+
+  .crown {
+    position: absolute;
+    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 32px; height: 22px;
+    background: linear-gradient(180deg, #ffd700 0%, #d4a300 100%);
+    clip-path: polygon(0% 100%, 0% 40%, 16% 70%, 25% 0%, 38% 60%, 50% 0%, 62% 60%, 75% 0%, 84% 70%, 100% 40%, 100% 100%);
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+  }
+  .crown::after {
+    content: "";
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 4px;
+    background: #b8860b;
+  }
+
+  .candle.first { transform: translateY(-15px); }
+
+  .candle-label { margin-top: 8px; text-align: center; font-family: 'Inter', sans-serif; }
+  .candle-name {
+    display: block;
+    font-weight: 800;
+    font-size: 14px;
+    color: #4a2c1a;
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+  }
+  .candle.first .candle-name { font-size: 17px; color: #d4699a; }
+  .candle.second .candle-name { font-size: 15px; color: #6b3a4f; }
+  .candle.third .candle-name { font-size: 15px; color: #8b5a3a; }
+
+  .candle-count {
+    display: block;
+    font-weight: 700;
+    font-size: 11px;
+    color: #8a6f4a;
+    margin-top: 1px;
+  }
+  .candle.first .candle-count { font-size: 13px; color: #d4699a; }
+
+  .rank-badge {
+    position: absolute;
+    top: -10px;
+    right: -8px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    color: #d4699a;
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #d4699a;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+  .candle.first .rank-badge { display: none; }
+
+  .empty-state {
+    margin-top: 80px;
+    text-align: center;
+    color: #fff;
+    font-family: 'Fredoka One', cursive;
+    font-size: 24px;
+    opacity: 0.7;
+  }
+
+  .leaderboard-footer {
+    position: absolute;
+    bottom: 4%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+  }
+
+  #status {
+    position: fixed;
+    top: 6px;
+    left: 6px;
+    font-family: 'Inter', sans-serif;
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    background: rgba(0,0,0,0.4);
+    padding: 3px 6px;
+    border-radius: 3px;
+    display: none;
+    z-index: 200;
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div id="leaderboard">
+  <div class="leaderboard-header">
+    <div class="leaderboard-title">🎂 BIRTHDAY POPPERS 🎂</div>
+    <div class="leaderboard-sub">Diva Squad Hall of Fame</div>
+  </div>
+  <div class="cake" id="cake"></div>
+  <div class="leaderboard-footer">Press ` to close</div>
+</div>
+
+<div id="status">Connecting...</div>
+
+<script>
+  // ============ CONFIG ============
+  const CONFIG = {
+    CHANNEL: 'asiandiva__',
+    POP_COMMAND: '!pop',
+    BIRTHDAY_COMMAND: '!birthday',
+    POP_COOLDOWN_MS: 4000,
+    BIRTHDAY_COOLDOWN_MS: 30000,
+    MAX_BALLOONS: 3,                 // max regular drifting balloons on screen
+    SPAWN_MIN_MS: 1000,              // shortest gap between spawns (1 sec)
+    SPAWN_MAX_MS: 60000,             // longest gap between spawns (60 sec)
+    SPAWN_BURST_CHANCE: 0.2,         // 20% chance of spawning a 2nd balloon shortly after
+    LEADERBOARD_TOP_N: 10,
+    PERSIST_KEY: 'asiandiva_bday_balloon_scores_v2',
+    SHOW_STATUS: false,
+
+    // ===== VIP / EVENT CONFIG =====
+    // SSE comes from this widget's own server (same origin). Standalone project.
+    BITS_TRACKER_SSE_URL: '/events',
+    BITS_MEDIUM_THRESHOLD: 500,
+    GIFTSUB_MEDIUM_THRESHOLD: 2,
+    GIFTSUB_BIG_THRESHOLD: 5,
+
+    POINTS: {
+      regular: 1,
+      vipRegular: 1,
+      vipMedium: 3,
+      vipBig: 5
+    },
+
+    // ===== POP STREAK (per-user) =====
+    // A streak belongs to ONE chatter. They build it by popping consecutively
+    // without anyone else interrupting. If someone else pops, the original
+    // streak breaks and the new popper starts at x1.
+    STREAK_IDLE_MS: 300000,          // 5 min of no pops at all → streak resets
+    STREAK_MIN_VISIBLE: 5,           // streak count needed to show the indicator
+
+    // ===== FLAIR (themed phrases that pop up randomly) =====
+    FLAIR_MIN_MS: 300000,            // shortest gap between flair (5 min)
+    FLAIR_MAX_MS: 600000,            // longest gap (10 min)
+    FLAIR_PHRASES: [
+      '🎈 POP POP POP!',
+      '🎂 Happy Birthday Diva!',
+      '✨ Make a wish ✨',
+      '🎁 You\'re the gift',
+      '🌟 Sparkle time',
+      '🎈 Float on',
+      '🎂 Cake o\'clock',
+      '🎉 Party in the chat',
+      '👑 Birthday Diva',
+      '✨ Magic moment',
+      '🎂 Make it count',
+      '💕 Pop with love',
+      '🎈 Today, we celebrate',
+      '🥳 Diva Squad on top',
+      '🎀 Sweetest day',
+      '🎈 Pop pop yay!',
+      '🌸 Bloom and pop',
+      '🎂 Wish granted'
+    ]
+  };
+
+  const COLORS = {
+    red:    { color: '#ff5e7a', highlight: '#ffb3c0', shadow: '#c43a52', aliases: ['red'] },
+    blue:   { color: '#5db4ff', highlight: '#b3d9ff', shadow: '#3a7fc4', aliases: ['blue'] },
+    green:  { color: '#7ed957', highlight: '#c8f0b0', shadow: '#4f9c33', aliases: ['green'] },
+    yellow: { color: '#ffd84a', highlight: '#fff0a0', shadow: '#c4a200', aliases: ['yellow'] },
+    purple: { color: '#b48dff', highlight: '#dcc8ff', shadow: '#7a5cc4', aliases: ['purple', 'violet'] },
+    pink:   { color: '#ff9ec7', highlight: '#ffd0e0', shadow: '#d46a98', aliases: ['pink'] }
+  };
+  const ALIAS_LOOKUP = {};
+  Object.entries(COLORS).forEach(([key, def]) => {
+    def.aliases.forEach(a => { ALIAS_LOOKUP[a.toLowerCase()] = key; });
+  });
+  const COLOR_KEYS = Object.keys(COLORS);
+
+  // ============ STATE ============
+  const stage = document.getElementById('stage');
+  const leaderboardEl = document.getElementById('leaderboard');
+  const cakeEl = document.getElementById('cake');
+  const statusEl = document.getElementById('status');
+  if (CONFIG.SHOW_STATUS) statusEl.style.display = 'block';
+
+  const balloons = new Set();
+  const popCooldowns = new Map();
+  const bdayCooldowns = new Map();
+  const seenEventIds = new Set();
+  const popStreak = {
+    username: null,                  // lowercased username of current streaker
+    displayName: null,               // their display name for the UI
+    count: 0,
+    lastPopTime: 0,
+    resetTimer: null
+  };
+  let scores = loadScores();
+
+  // ============ SCORE PERSISTENCE ============
+  function loadScores() {
+    try {
+      const raw = localStorage.getItem(CONFIG.PERSIST_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+  function saveScores() {
+    try { localStorage.setItem(CONFIG.PERSIST_KEY, JSON.stringify(scores)); }
+    catch {}
+  }
+  function addScore(username, displayName, points = 1) {
+    const key = username.toLowerCase();
+    if (!scores[key]) scores[key] = { display: displayName, count: 0 };
+    scores[key].display = displayName;
+    scores[key].count += points;
+    saveScores();
+    if (leaderboardEl.classList.contains('open')) renderLeaderboard();
+  }
+
+  // ============ REGULAR BALLOON SPAWN ============
+  function spawnBalloon() {
+    if (countRegularBalloons() >= CONFIG.MAX_BALLOONS) return;
+
+    const colorKey = COLOR_KEYS[Math.floor(Math.random() * COLOR_KEYS.length)];
+    const def = COLORS[colorKey];
+
+    const b = document.createElement('div');
+    b.className = `balloon balloon-${colorKey}`;
+    b.dataset.color = colorKey;
+    b.dataset.vip = 'false';
+    b.style.setProperty('--color', def.color);
+    b.style.setProperty('--highlight', def.highlight);
+    b.style.setProperty('--shadow', def.shadow);
+
+    b.style.left = (5 + Math.random() * 88) + '%';
+    const riseDur = 14 + Math.random() * 8;
+    const swayDur = 2.5 + Math.random() * 1.5;
+    b.style.setProperty('--rise-dur', riseDur + 's');
+    b.style.setProperty('--sway-dur', swayDur + 's');
+    const scale = 0.85 + Math.random() * 0.35;
+    b.style.zoom = scale;
+
+    b.innerHTML = `
+      <div class="balloon-body"></div>
+      <div class="balloon-knot"></div>
+      <div class="balloon-string"></div>
+    `;
+
+    stage.appendChild(b);
+    balloons.add(b);
+
+    setTimeout(() => {
+      if (b.parentNode && !b.classList.contains('popping')) {
+        b.remove();
+        balloons.delete(b);
+      }
+    }, riseDur * 1000 + 500);
+  }
+
+  function countRegularBalloons() {
+    let n = 0;
+    for (const b of balloons) if (b.dataset.vip !== 'true') n++;
+    return n;
+  }
+
+  // ============ VIP BALLOON SPAWN ============
+  function spawnVIPBalloon(size, eventType, meta) {
+    const colorKey = COLOR_KEYS[Math.floor(Math.random() * COLOR_KEYS.length)];
+    const def = COLORS[colorKey];
+
+    const b = document.createElement('div');
+    b.className = `balloon balloon-${colorKey} vip vip-${size}`;
+    b.dataset.color = colorKey;
+    b.dataset.vip = 'true';
+    b.dataset.vipSize = size;
+    b.dataset.eventType = eventType;
+    b.dataset.displayName = meta.displayName;
+    b.style.setProperty('--color', def.color);
+    b.style.setProperty('--highlight', def.highlight);
+    b.style.setProperty('--shadow', def.shadow);
+
+    // Approximate balloon dimensions per size
+    const sizeMap = { regular: [70, 90], medium: [105, 135], big: [145, 185] };
+    const [sw, sh] = sizeMap[size] || sizeMap.regular;
+
+    // Start position: just below the bottom edge, random X
+    const startX = 40 + Math.random() * (window.innerWidth - sw - 80);
+    b.style.left = startX + 'px';
+    b.style.top = (window.innerHeight + 60) + 'px';
+
+    let icon = '🎁', amountText = '';
+    if (eventType === 'cheer') {
+      icon = '💎';
+      if (meta.bits) amountText = `<span class="event-amount">${meta.bits}</span>`;
+    } else if (eventType === 'blerp') {
+      icon = '🔊';
+      if (meta.bits) amountText = `<span class="event-amount">${meta.bits}</span>`;
+    } else if (eventType === 'giftsub') {
+      icon = '🎁';
+      if (meta.count && meta.count > 1) amountText = `<span class="event-amount">×${meta.count}</span>`;
+    } else if (eventType === 'resub') {
+      icon = '⭐';
+      if (meta.months && meta.months > 1) amountText = `<span class="event-amount">${meta.months}mo</span>`;
+    }
+
+    b.innerHTML = `
+      <div class="balloon-body"></div>
+      <div class="balloon-knot"></div>
+      <div class="balloon-string"></div>
+      <div class="balloon-tag">
+        <span class="event-icon">${icon}</span>${escapeHtml(meta.displayName)}${amountText}
+      </div>
+    `;
+
+    stage.appendChild(b);
+    balloons.add(b);
+
+    // Begin wandering after a frame so initial position is committed
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => moveVIPToRandomLocation(b));
+    });
+  }
+
+  // ============ VIP WANDERING ============
+  function moveVIPToRandomLocation(balloon) {
+    if (!balloon.parentNode || balloon.classList.contains('popping')) return;
+
+    const sizeW = balloon.offsetWidth || 100;
+    const sizeH = balloon.offsetHeight || 100;
+
+    // Keep balloon fully visible with margin; reserve bottom 140px for tag
+    const minX = 40;
+    const maxX = Math.max(minX + 100, window.innerWidth - sizeW - 40);
+    const minY = 40;
+    const maxY = Math.max(minY + 100, window.innerHeight - sizeH - 140);
+
+    const destX = minX + Math.random() * (maxX - minX);
+    const destY = minY + Math.random() * (maxY - minY);
+
+    balloon.style.left = destX + 'px';
+    balloon.style.top = destY + 'px';
+
+    // Pick a new destination after a randomized interval so balloons feel alive
+    const nextDelay = 6000 + Math.random() * 6000;
+    balloon._wanderTimer = setTimeout(() => moveVIPToRandomLocation(balloon), nextDelay);
+  }
+
+  // Reposition any off-screen VIPs on resize
+  window.addEventListener('resize', () => {
+    for (const b of balloons) {
+      if (b.dataset.vip !== 'true' || b.classList.contains('popping')) continue;
+      const sw = b.offsetWidth;
+      const sh = b.offsetHeight;
+      const l = parseFloat(b.style.left) || 0;
+      const t = parseFloat(b.style.top) || 0;
+      if (l + sw > window.innerWidth - 20) b.style.left = (window.innerWidth - sw - 40) + 'px';
+      if (t + sh > window.innerHeight - 20) b.style.top = (window.innerHeight - sh - 140) + 'px';
+    }
+  });
+
+  // ============ POP TARGETING ============
+  function popBalloon(colorKey, username, displayName) {
+    const candidates = [...balloons].filter(b =>
+      b.dataset.color === colorKey && !b.classList.contains('popping') && b.parentNode
+    );
+    if (candidates.length === 0) return false;
+
+    // Prefer VIPs that are visible on screen — don't waste pops on ones still rising
+    const allVips = candidates.filter(b => b.dataset.vip === 'true');
+    const visibleVips = allVips.filter(b => {
+      const rect = b.getBoundingClientRect();
+      return rect.bottom > 0 && rect.top < window.innerHeight &&
+             rect.right > 0 && rect.left < window.innerWidth;
+    });
+    const vips = visibleVips.length > 0 ? visibleVips : allVips;
+
+    let target;
+    let isVIP = false;
+    if (vips.length > 0) {
+      const sizeRank = { big: 3, medium: 2, regular: 1 };
+      vips.sort((a, b) => sizeRank[b.dataset.vipSize] - sizeRank[a.dataset.vipSize]);
+      target = vips[0];
+      isVIP = true;
+    } else {
+      let bestY = Infinity;
+      target = candidates[0];
+      for (const b of candidates) {
+        const rect = b.getBoundingClientRect();
+        if (rect.top < bestY) { bestY = rect.top; target = b; }
+      }
+    }
+
+    popAt(target, displayName, isVIP);
+
+    let points = CONFIG.POINTS.regular;
+    if (isVIP) {
+      const s = target.dataset.vipSize;
+      if (s === 'big') points = CONFIG.POINTS.vipBig;
+      else if (s === 'medium') points = CONFIG.POINTS.vipMedium;
+      else points = CONFIG.POINTS.vipRegular;
+    }
+    addScore(username, displayName, points);
+    recordPopForStreak(username, displayName);
+    return true;
+  }
+
+  function popAt(balloon, popperName, isVIP) {
+    if (balloon._wanderTimer) clearTimeout(balloon._wanderTimer);
+
+    // Capture the balloon's CURRENT on-screen position before stopping its
+    // animation. Without this, the rise/wander animation cancels and the
+    // balloon snaps back to its starting position (off-screen for regulars)
+    // before the shrink plays — so you see nothing.
+    const rect = balloon.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    // Freeze position with inline styles so it stays put while shrinking
+    balloon.style.bottom = 'auto';
+    balloon.style.margin = '0';
+    balloon.style.transition = 'none';
+    balloon.style.top = rect.top + 'px';
+    balloon.style.left = rect.left + 'px';
+    balloon.style.transform = 'none';
+
+    balloon.classList.add('popping');
+
+    if (isVIP) {
+      // VIP: full confetti burst + credit text with label
+      const colorKey = balloon.dataset.color;
+      const def = COLORS[colorKey];
+      const size = balloon.dataset.vipSize;
+      const particleCount = size === 'big' ? 32 : size === 'medium' ? 22 : 16;
+      burstParticles(cx, cy, [def.color, def.highlight, '#ffd700', '#fff'], particleCount, true);
+      const points = size === 'big' ? CONFIG.POINTS.vipBig
+                   : size === 'medium' ? CONFIG.POINTS.vipMedium
+                   : CONFIG.POINTS.vipRegular;
+      const label = size === 'big' ? 'BIG VIP POP!' : 'VIP POP!';
+      showCredit(cx, cy, popperName, points, true, label);
+    }
+    // Regular pops: shrink animation only — no confetti, no credit text.
+    // Score still updates silently (visible when leaderboard opens).
+
+    setTimeout(() => {
+      if (balloon.parentNode) balloon.remove();
+      balloons.delete(balloon);
+    }, 650);
+  }
+
+  function showCredit(x, y, name, points, isVIP, label) {
+    const credit = document.createElement('div');
+    credit.className = 'pop-credit' + (isVIP ? ' vip-pop' : '');
+    credit.style.left = x + 'px';
+    credit.style.top = y + 'px';
+    const labelHTML = isVIP && label ? `${label}<br>` : '';
+    credit.innerHTML = `${labelHTML}${escapeHtml(name)}<span class="plus">+${points}</span>`;
+    document.body.appendChild(credit);
+    setTimeout(() => credit.remove(), 1700);
+  }
+
+  function burstParticles(x, y, colors, count, big) {
+    for (let i = 0; i < count; i++) {
+      const p = document.createElement('div');
+      p.className = 'pop-particle';
+      if (big) { p.style.width = '12px'; p.style.height = '18px'; }
+      p.style.background = colors[i % colors.length];
+      p.style.left = x + 'px';
+      p.style.top = y + 'px';
+
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+      const speed = (big ? 140 : 80) + Math.random() * 160;
+      const dx = Math.cos(angle) * speed;
+      const dy = Math.sin(angle) * speed;
+      const rot = (Math.random() * 720 - 360) + 'deg';
+      p.style.setProperty('--dx', dx + 'px');
+      p.style.setProperty('--dy', dy + 'px');
+      p.style.setProperty('--rot', rot);
+      const dur = 0.8 + Math.random() * 0.8;
+      p.style.animation = `particleBurst ${dur}s ease-out forwards`;
+
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), dur * 1000 + 100);
+    }
+  }
+
+  // ============ POP STREAK (per-user) ============
+  function recordPopForStreak(username, displayName) {
+    const lowerUser = username.toLowerCase();
+    const now = Date.now();
+
+    if (popStreak.username === lowerUser) {
+      // Same chatter — extend their streak
+      popStreak.count++;
+    } else {
+      // Different chatter — previous streak breaks
+      if (popStreak.count >= CONFIG.STREAK_MIN_VISIBLE && popStreak.username !== null) {
+        // The previous streak was visible — show the broken animation
+        showBrokenStreak(popStreak.displayName, popStreak.count, displayName);
+      }
+      popStreak.username = lowerUser;
+      popStreak.displayName = displayName;
+      popStreak.count = 1;
+    }
+    popStreak.lastPopTime = now;
+
+    if (popStreak.count >= CONFIG.STREAK_MIN_VISIBLE) {
+      // The new pop hits threshold — show active streak (overrides broken if shown)
+      renderStreak(popStreak.displayName, popStreak.count);
+    }
+    // If below threshold, don't hide here — broken animation handles its own lifecycle
+
+    // Idle reset — if no pops at all happen for STREAK_IDLE_MS, wipe the streak
+    if (popStreak.resetTimer) clearTimeout(popStreak.resetTimer);
+    popStreak.resetTimer = setTimeout(() => {
+      popStreak.count = 0;
+      popStreak.username = null;
+      popStreak.displayName = null;
+      hideStreak();
+    }, CONFIG.STREAK_IDLE_MS);
+  }
+
+  function renderStreak(displayName, count) {
+    let el = document.getElementById('streak-counter');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'streak-counter';
+      el.className = 'streak-counter';
+      el.innerHTML = `
+        <span class="streak-fire">🔥</span>
+        <span class="streak-text"></span>
+      `;
+      document.body.appendChild(el);
+    }
+
+    // Reset to active state — wipes any broken styling
+    el.querySelector('.streak-fire').textContent = '🔥';
+
+    // Tier escalates with streak length
+    let tier = '';
+    if (count >= 10) tier = 'tier-legendary';
+    else if (count >= 7) tier = 'tier-high';
+
+    el.className = `streak-counter visible ${tier}`;
+    el.querySelector('.streak-text').innerHTML =
+      `<span class="streak-name">${escapeHtml(displayName)}</span> ×${count} STREAK!`;
+
+    // Re-trigger pulse animation by toggling class via reflow
+    el.classList.remove('pulse');
+    void el.offsetWidth;
+    el.classList.add('pulse');
+  }
+
+  function showBrokenStreak(brokenName, brokenCount, breakerName) {
+    let el = document.getElementById('streak-counter');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'streak-counter';
+      el.innerHTML = `
+        <span class="streak-fire">💔</span>
+        <span class="streak-text"></span>
+      `;
+      document.body.appendChild(el);
+    } else {
+      el.querySelector('.streak-fire').textContent = '💔';
+    }
+
+    el.className = 'streak-counter visible broken';
+    el.querySelector('.streak-text').innerHTML = `
+      <span class="streak-name">${escapeHtml(brokenName)}</span> ×${brokenCount} STREAK
+      <span class="streak-broken-by">💀 Broken by ${escapeHtml(breakerName)}</span>
+    `;
+
+    // Mark this DOM element with a timestamp so we can detect if it's been
+    // replaced by a fresh streak before our cleanup fires
+    const brokenAt = Date.now();
+    el.dataset.brokenAt = brokenAt;
+
+    // After 3 seconds, fade out the broken animation (but only if it's still
+    // the broken animation showing — a new active streak might have replaced it)
+    setTimeout(() => {
+      const stillEl = document.getElementById('streak-counter');
+      if (stillEl && stillEl.classList.contains('broken') && stillEl.dataset.brokenAt === String(brokenAt)) {
+        stillEl.classList.remove('visible');
+        setTimeout(() => stillEl.classList.remove('broken'), 400);
+      }
+    }, 3000);
+  }
+
+  function hideStreak() {
+    const el = document.getElementById('streak-counter');
+    if (el) {
+      el.classList.remove('visible');
+      setTimeout(() => el.classList.remove('broken'), 400);
+    }
+  }
+
+  // ============ !BIRTHDAY CELEBRATION ============
+  function triggerBirthdayCelebration(displayName) {
+    const banner = document.createElement('div');
+    banner.className = 'bday-banner';
+    banner.innerHTML = `
+      <div class="bday-banner-title">🎂 Happy Birthday Diva! 🎂</div>
+      <div class="bday-banner-sub">from ${escapeHtml(displayName)}</div>
+    `;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 4400);
+
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const palette = ['#ff6b9d', '#ffd700', '#5dc9c4', '#c5b6f7', '#ffaab5', '#a8e6cf', '#ff9ec7', '#fff'];
+    for (let burst = 0; burst < 3; burst++) {
+      setTimeout(() => burstParticles(cx, cy, palette, 40, true), burst * 200);
+    }
+    for (let i = 0; i < 6; i++) setTimeout(spawnBalloon, i * 200);
+  }
+
+  // ============ FLAIR (random themed phrases) ============
+  let lastFlairPhrase = '';
+
+  function showFlair() {
+    if (CONFIG.FLAIR_PHRASES.length === 0) return;
+
+    // Pick a phrase, avoiding immediate repeats
+    let phrase;
+    do {
+      phrase = CONFIG.FLAIR_PHRASES[Math.floor(Math.random() * CONFIG.FLAIR_PHRASES.length)];
+    } while (phrase === lastFlairPhrase && CONFIG.FLAIR_PHRASES.length > 1);
+    lastFlairPhrase = phrase;
+
+    // Pick a position — bias toward the bottom 40% so it's less likely to
+    // cover the face when the widget is overlaid on the camera, but allow
+    // some horizontal variety
+    const marginX = 160;
+    const x = marginX + Math.random() * (window.innerWidth - marginX * 2);
+    const yMin = window.innerHeight * 0.55;
+    const yMax = window.innerHeight - 120;
+    const y = yMin + Math.random() * (yMax - yMin);
+
+    // The phrase itself
+    const el = document.createElement('div');
+    el.className = 'flair';
+    el.textContent = phrase;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    document.body.appendChild(el);
+
+    // Sparkle decorations placed around the text
+    const sparkleEmojis = ['✨', '⭐', '💫', '🌟'];
+    const sparkleCount = 6 + Math.floor(Math.random() * 3);
+    const sparkleEls = [];
+    for (let i = 0; i < sparkleCount; i++) {
+      const s = document.createElement('div');
+      s.className = 'flair-sparkle';
+      s.textContent = sparkleEmojis[Math.floor(Math.random() * sparkleEmojis.length)];
+      // Spread sparkles around the phrase in a rough oval
+      const angle = (Math.PI * 2 * i) / sparkleCount + Math.random() * 0.5;
+      const radiusX = 140 + Math.random() * 60;
+      const radiusY = 50 + Math.random() * 30;
+      s.style.left = (x + Math.cos(angle) * radiusX) + 'px';
+      s.style.top  = (y + Math.sin(angle) * radiusY) + 'px';
+      s.style.animationDelay = (Math.random() * 1.2) + 's';
+      document.body.appendChild(s);
+      sparkleEls.push(s);
+    }
+
+    // Cleanup after all animations complete
+    setTimeout(() => {
+      el.remove();
+      sparkleEls.forEach(s => s.remove());
+    }, 4800);
+  }
+
+  function scheduleNextFlair() {
+    const range = CONFIG.FLAIR_MAX_MS - CONFIG.FLAIR_MIN_MS;
+    const delay = CONFIG.FLAIR_MIN_MS + Math.random() * range;
+    setTimeout(() => {
+      showFlair();
+      scheduleNextFlair();
+    }, delay);
+  }
+
+  // ============ LEADERBOARD RENDER ============
+  function renderLeaderboard() {
+    const entries = Object.entries(scores)
+      .map(([key, v]) => ({ key, display: v.display, count: v.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, CONFIG.LEADERBOARD_TOP_N);
+
+    if (entries.length === 0) {
+      cakeEl.innerHTML = `<div class="empty-state">🎈 No balloons popped yet — chat, get to work! 🎈</div>`;
+      return;
+    }
+
+    const first = entries[0];
+    const second = entries[1];
+    const third = entries[2];
+    const rest = entries.slice(3);
+
+    const sprinkles = (count) => Array.from({ length: count }, () => {
+      const colors = ['#ff6b9d', '#5dc9c4', '#ffd700', '#b48dff', '#ff9ec7', '#a8e6cf'];
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      const x = 5 + Math.random() * 90;
+      const y = 30 + Math.random() * 60;
+      const rot = Math.floor(Math.random() * 90 - 45);
+      return `<span class="sprinkle" style="left:${x}%;top:${y}%;background:${c};--rot:${rot}deg;transform:rotate(${rot}deg);"></span>`;
+    }).join('');
+
+    const candleHTML = (entry, rank, classMod = '') => {
+      if (!entry) return '';
+      const palette = ['#ff9ec7', '#5dc9c4', '#ffd84a', '#b48dff', '#ff5e7a', '#7ed957'];
+      const c = palette[(rank - 1) % palette.length];
+      const dark = shade(c, -25);
+      return `
+        <div class="candle ${classMod}">
+          ${rank === 1 ? '<div class="crown"></div>' : ''}
+          ${rank > 1 ? `<div class="rank-badge">${rank}</div>` : ''}
+          <div class="candle-stick" style="--candle-light:${c};--candle-dark:${dark};">
+            <div class="candle-wick"></div>
+            <div class="candle-flame"></div>
+          </div>
+          <div class="candle-label">
+            <span class="candle-name">${escapeHtml(entry.display)}</span>
+            <span class="candle-count">${entry.count} pt${entry.count === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+      `;
+    };
+
+    cakeEl.innerHTML = `
+      <div class="tier tier-top">
+        ${sprinkles(6)}
+        <div class="candles-row">${candleHTML(first, 1, 'first')}</div>
+      </div>
+      <div class="tier tier-mid">
+        ${sprinkles(10)}
+        <div class="candles-row">
+          ${second ? candleHTML(second, 2, 'second') : ''}
+          ${third ? candleHTML(third, 3, 'third') : ''}
+        </div>
+      </div>
+      <div class="tier tier-bottom">
+        ${sprinkles(14)}
+        <div class="candles-row">
+          ${rest.map((e, i) => candleHTML(e, i + 4)).join('')}
+        </div>
+        <div class="cake-text">DIVA'S BIRTHDAY</div>
+      </div>
+    `;
+  }
+
+  function shade(hex, percent) {
+    const num = parseInt(hex.slice(1), 16);
+    const amt = Math.round(2.55 * percent);
+    let r = (num >> 16) + amt;
+    let g = ((num >> 8) & 0x00FF) + amt;
+    let b = (num & 0x0000FF) + amt;
+    r = Math.max(0, Math.min(255, r));
+    g = Math.max(0, Math.min(255, g));
+    b = Math.max(0, Math.min(255, b));
+    return '#' + (r << 16 | g << 8 | b).toString(16).padStart(6, '0');
+  }
+
+  // ============ HOTKEYS ============
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '`' || e.code === 'Backquote') {
+      e.preventDefault();
+      toggleLeaderboard();
+      return;
+    }
+    const testUsers = ['Teresa', 'Luke', 'Awkward', 'Jax', 'BubbleTeaQ', 'Doc', 'Vino', 'Suze', 'VanishArmy'];
+    const u = () => testUsers[Math.floor(Math.random() * testUsers.length)];
+    if (e.key === 't' || e.key === 'T') spawnBalloon();
+    if (e.key === 'b' || e.key === 'B') triggerBirthdayCelebration('TestUser');
+    if (e.key === 'f' || e.key === 'F') showFlair();
+    if (e.key === 'p' || e.key === 'P') {
+      const name = u();
+      const available = [...balloons].find(b => !b.classList.contains('popping') && b.parentNode);
+      if (available) {
+        popBalloon(available.dataset.color, name, name);
+      } else {
+        // No balloon available — still simulate the pop for testing the streak/break flow
+        recordPopForStreak(name, name);
+      }
+    }
+    if (e.key === 's' || e.key === 'S') {
+      // Streak test as Teresa. If a balloon's on screen, pop it (full animation
+      // + score + streak update). If not, just bump the streak indicator so
+      // you can still test the visual at 5+, 7+, 10+ tiers without waiting.
+      if (e.shiftKey) return;
+      const available = [...balloons].find(b => !b.classList.contains('popping') && b.parentNode);
+      if (available) {
+        popBalloon(available.dataset.color, 'Teresa', 'Teresa');
+      } else {
+        recordPopForStreak('Teresa', 'Teresa');
+      }
+    }
+    // VIP balloon test hotkeys
+    if (e.key === '1') spawnVIPBalloon('regular', 'resub', { displayName: u(), months: 5 });
+    if (e.key === '2') spawnVIPBalloon('regular', 'giftsub', { displayName: u(), count: 1 });
+    if (e.key === '3') spawnVIPBalloon('medium', 'giftsub', { displayName: u(), count: 3 });
+    if (e.key === '4') spawnVIPBalloon('big', 'giftsub', { displayName: u(), count: 10 });
+    if (e.key === '5') spawnVIPBalloon('regular', 'cheer', { displayName: u(), bits: 200 });
+    if (e.key === '6') spawnVIPBalloon('medium', 'cheer', { displayName: u(), bits: 1000 });
+    if (e.key === '7') spawnVIPBalloon('regular', 'blerp', { displayName: u(), bits: 100 });
+    if (e.key === 'r' || e.key === 'R') {
+      if (e.shiftKey) {
+        scores = {};
+        saveScores();
+        renderLeaderboard();
+      }
+    }
+  });
+
+  function toggleLeaderboard() {
+    if (leaderboardEl.classList.contains('open')) {
+      leaderboardEl.classList.remove('open');
+    } else {
+      renderLeaderboard();
+      leaderboardEl.classList.add('open');
+    }
+  }
+
+  // ============ TWITCH IRC ============
+  let ws;
+  let reconnectAttempts = 0;
+
+  function connectIRC() {
+    setStatus('Connecting to Twitch IRC...');
+    ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+
+    ws.onopen = () => {
+      const nick = 'justinfan' + Math.floor(Math.random() * 100000);
+      ws.send('CAP REQ :twitch.tv/tags');
+      ws.send('PASS SCHMOOPIIE');
+      ws.send(`NICK ${nick}`);
+      ws.send(`JOIN #${CONFIG.CHANNEL.toLowerCase()}`);
+      setStatus(`IRC connected → #${CONFIG.CHANNEL}`);
+      reconnectAttempts = 0;
+    };
+
+    ws.onmessage = (event) => {
+      const lines = event.data.split('\r\n');
+      for (const line of lines) {
+        if (!line) continue;
+        if (line.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); continue; }
+        handleIRCLine(line);
+      }
+    };
+
+    ws.onclose = () => {
+      setStatus('IRC disconnected — reconnecting...');
+      reconnectAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+      setTimeout(connectIRC, delay);
+    };
+
+    ws.onerror = () => setStatus('IRC error');
+  }
+
+  function handleIRCLine(line) {
+    let rest = line;
+    let tags = {};
+
+    if (rest.startsWith('@')) {
+      const sp = rest.indexOf(' ');
+      const tagStr = rest.slice(1, sp);
+      rest = rest.slice(sp + 1);
+      tagStr.split(';').forEach(t => {
+        const [k, v] = t.split('=');
+        tags[k] = v;
+      });
+    }
+
+    const privIdx = rest.indexOf(' PRIVMSG ');
+    if (privIdx === -1) return;
+
+    const prefix = rest.slice(1, privIdx);
+    const nick = prefix.split('!')[0];
+    const afterPriv = rest.slice(privIdx + 9);
+    const colonIdx = afterPriv.indexOf(' :');
+    if (colonIdx === -1) return;
+    const message = afterPriv.slice(colonIdx + 2).trim();
+
+    const displayName = tags['display-name'] || nick;
+    const lowerMsg = message.toLowerCase();
+
+    if (lowerMsg === CONFIG.BIRTHDAY_COMMAND || lowerMsg.startsWith(CONFIG.BIRTHDAY_COMMAND + ' ')) {
+      const now = Date.now();
+      const last = bdayCooldowns.get(nick.toLowerCase()) || 0;
+      if (now - last < CONFIG.BIRTHDAY_COOLDOWN_MS) return;
+      bdayCooldowns.set(nick.toLowerCase(), now);
+      triggerBirthdayCelebration(displayName);
+      return;
+    }
+
+    if (lowerMsg.startsWith(CONFIG.POP_COMMAND + ' ') || lowerMsg === CONFIG.POP_COMMAND) {
+      const now = Date.now();
+      const last = popCooldowns.get(nick.toLowerCase()) || 0;
+      if (now - last < CONFIG.POP_COOLDOWN_MS) return;
+
+      const parts = lowerMsg.split(/\s+/);
+      const arg = parts[1];
+      if (!arg) return;
+      const colorKey = ALIAS_LOOKUP[arg];
+      if (!colorKey) return;
+
+      const popped = popBalloon(colorKey, nick, displayName);
+      if (popped) popCooldowns.set(nick.toLowerCase(), now);
+      return;
+    }
+  }
+
+  // ============ SSE (sub/bits/Blerp events from bits tracker) ============
+  let sseSource;
+  let sseReconnectAttempts = 0;
+
+  function connectSSE() {
+    if (!CONFIG.BITS_TRACKER_SSE_URL) {
+      setStatus('SSE disabled (no URL)');
+      return;
+    }
+    setStatus('Connecting to bits tracker...');
+    try {
+      sseSource = new EventSource(CONFIG.BITS_TRACKER_SSE_URL);
+
+      sseSource.onopen = () => {
+        setStatus('SSE connected → bits tracker');
+        sseReconnectAttempts = 0;
+      };
+
+      sseSource.onmessage = (e) => handleSSEMessage(e);
+
+      ['cheer', 'bits', 'sub', 'resub', 'giftsub', 'subgift', 'blerp', 'event'].forEach(name => {
+        sseSource.addEventListener(name, (e) => handleSSEMessage(e, name));
+      });
+
+      sseSource.onerror = () => {
+        setStatus('SSE error — reconnecting...');
+        try { sseSource.close(); } catch {}
+        sseReconnectAttempts++;
+        const delay = Math.min(2000 * Math.pow(2, sseReconnectAttempts), 30000);
+        setTimeout(connectSSE, delay);
+      };
+    } catch (err) {
+      setStatus('SSE failed: ' + err.message);
+    }
+  }
+
+  function handleSSEMessage(e, eventName) {
+    let data;
+    try { data = JSON.parse(e.data); }
+    catch { return; }
+
+    const id = data.id || data.eventId || data.event_id;
+    if (id) {
+      if (seenEventIds.has(id)) return;
+      seenEventIds.add(id);
+      if (seenEventIds.size > 500) {
+        const arr = [...seenEventIds];
+        for (let i = 0; i < 100; i++) seenEventIds.delete(arr[i]);
+      }
+    }
+
+    const type = (eventName || data.type || data.event || data.event_type || '').toLowerCase();
+    const user = data.user || data.username || data.user_login || data.user_name || data.login || data.from || '';
+    const displayName = data.displayName || data.display_name || data.userName || data.user_name || user || 'Anonymous';
+    const bits = Number(data.bits || data.amount || data.bit_count || data.total_bits || 0);
+    const count = Number(data.count || data.total || data.quantity || data.sub_count || data.cumulative_total || 0);
+    const months = Number(data.months || data.cumulative_months || data.streak_months || 0);
+
+    if (!displayName) return;
+    routeEvent(type, displayName, { bits, count, months });
+  }
+
+  function routeEvent(type, displayName, meta) {
+    if (type.includes('resub') || type === 'subscription.message' || type === 'channel.subscription.message') {
+      spawnVIPBalloon('regular', 'resub', { displayName, months: meta.months });
+      return;
+    }
+    if (type.includes('gift') || type === 'subscription.gift' || type === 'channel.subscription.gift') {
+      const c = meta.count || 1;
+      let size = 'regular';
+      if (c >= CONFIG.GIFTSUB_BIG_THRESHOLD) size = 'big';
+      else if (c >= CONFIG.GIFTSUB_MEDIUM_THRESHOLD) size = 'medium';
+      spawnVIPBalloon(size, 'giftsub', { displayName, count: c });
+      return;
+    }
+    if (type === 'sub' || type === 'subscribe' || type === 'channel.subscribe' || type === 'subscription') {
+      spawnVIPBalloon('regular', 'resub', { displayName });
+      return;
+    }
+    if (type.includes('blerp')) {
+      const size = meta.bits >= CONFIG.BITS_MEDIUM_THRESHOLD ? 'medium' : 'regular';
+      spawnVIPBalloon(size, 'blerp', { displayName, bits: meta.bits });
+      return;
+    }
+    if (type.includes('cheer') || type.includes('bits')) {
+      const size = meta.bits >= CONFIG.BITS_MEDIUM_THRESHOLD ? 'medium' : 'regular';
+      spawnVIPBalloon(size, 'cheer', { displayName, bits: meta.bits });
+      return;
+    }
+    if (CONFIG.SHOW_STATUS) console.log('Unknown SSE event type:', type, meta);
+  }
+
+  function setStatus(text) {
+    if (CONFIG.SHOW_STATUS) statusEl.textContent = text;
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // ============ START ============
+  // Spawning is intentionally unpredictable so balloons don't feel constant.
+  // Each schedule picks a fresh random delay between SPAWN_MIN_MS and
+  // SPAWN_MAX_MS, then occasionally spawns a quick follow-up balloon.
+  function scheduleNextSpawn() {
+    const range = CONFIG.SPAWN_MAX_MS - CONFIG.SPAWN_MIN_MS;
+    const delay = CONFIG.SPAWN_MIN_MS + Math.random() * range;
+    setTimeout(() => {
+      spawnBalloon();
+      // Occasionally fire a quick second balloon for variety
+      if (Math.random() < CONFIG.SPAWN_BURST_CHANCE) {
+        setTimeout(spawnBalloon, 600 + Math.random() * 1400);
+      }
+      scheduleNextSpawn();
+    }, delay);
+  }
+  scheduleNextSpawn();
+  scheduleNextFlair();
+
+  connectIRC();
+  connectSSE();
+</script>
+</body>
+</html>
