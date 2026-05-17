@@ -8,10 +8,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Inter:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
   /* ============ DIVA'S BIRTHDAY BALLOON POP (VIP edition) ============
-     Always-on stream widget. Chat pops balloons by color, scores tracked,
+     Always-on stream widget. Chat pops VIP balloons by color, scores tracked,
      leaderboard toggles via backtick. Sub/bits/Blerp events spawn VIP
      balloons that hover at the top of the screen with the chatter's name
-     until popped. !birthday triggers a confetti celebration.
+     until popped.
 
      Config: see CONFIG block at top of <script>.
      OBS: enable "Interact" on the browser source for backtick + key tests.
@@ -187,48 +187,6 @@
 
   /* (vipRise and vipBob removed — VIPs now wander via JS top/left transitions) */
 
-  /* ============ FLAIR (random themed phrases) ============ */
-  .flair {
-    position: fixed;
-    font-family: 'Fredoka One', cursive;
-    font-size: clamp(38px, 5.5vw, 64px);
-    color: #ff6b9d;
-    text-shadow:
-      3px 3px 0 #fff,
-      6px 6px 0 #ffd700,
-      0 0 30px rgba(255, 192, 203, 0.6),
-      0 0 60px rgba(255, 215, 0, 0.4);
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 30;
-    letter-spacing: 1px;
-    animation: flairLife 4.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  }
-
-  /* Single composite animation: bouncy entrance → gentle hold → drift-up exit */
-  @keyframes flairLife {
-    0%   { transform: translate(-50%, -50%) scale(0)    rotate(-15deg); opacity: 0; }
-    10%  { transform: translate(-50%, -50%) scale(1.18) rotate(6deg);   opacity: 1; }
-    16%  { transform: translate(-50%, -50%) scale(0.96) rotate(-3deg);  opacity: 1; }
-    22%  { transform: translate(-50%, -50%) scale(1)    rotate(0deg);   opacity: 1; }
-    78%  { transform: translate(-50%, -50%) scale(1)    rotate(0deg);   opacity: 1; }
-    100% { transform: translate(-50%, -50%) translateY(-50px) scale(0.92) rotate(3deg); opacity: 0; }
-  }
-
-  /* Sparkle decorations that twinkle around the flair text */
-  .flair-sparkle {
-    position: fixed;
-    font-size: 28px;
-    pointer-events: none;
-    z-index: 29;
-    animation: flairSparkle 2s ease-in-out forwards;
-  }
-  @keyframes flairSparkle {
-    0%   { transform: scale(0)   rotate(0deg);   opacity: 0; }
-    20%  { transform: scale(1.4) rotate(180deg); opacity: 1; }
-    50%  { transform: scale(1)   rotate(360deg); opacity: 1; }
-    100% { transform: scale(0)   rotate(540deg); opacity: 0; }
-  }
   .balloon.popping { animation: none !important; }
   .balloon.popping .balloon-body,
   .balloon.popping .balloon-knot,
@@ -381,52 +339,6 @@
     70% { transform: translateX(-4px); }
     80% { transform: translateX(4px); }
     90% { transform: translateX(-2px); }
-  }
-
-  /* ============ BIRTHDAY ALERT ============ */
-  .bday-banner {
-    position: fixed;
-    left: 50%;
-    top: 35%;
-    transform: translate(-50%, -50%) scale(0);
-    padding: 24px 56px;
-    background: linear-gradient(135deg, #fff5e6 0%, #ffd6e8 50%, #fff5e6 100%);
-    border: 5px solid #ffd700;
-    border-radius: 22px;
-    box-shadow:
-      0 0 0 4px #fff,
-      0 0 0 8px #d4699a,
-      0 24px 60px rgba(0,0,0,0.4),
-      inset 0 0 40px rgba(255,215,0,0.2);
-    text-align: center;
-    pointer-events: none;
-    z-index: 50;
-    animation:
-      bannerIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-      bannerOut 0.5s 3.8s ease-in forwards;
-  }
-  .bday-banner-title {
-    font-family: 'Fredoka One', cursive;
-    color: #d4699a;
-    font-size: 44px;
-    text-shadow: 3px 3px 0 #fff, 4px 4px 0 #ffd700;
-    line-height: 1.1;
-  }
-  .bday-banner-sub {
-    margin-top: 6px;
-    font-family: 'Inter', sans-serif;
-    font-weight: 700;
-    color: #6b3f5a;
-    font-size: 16px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-  }
-  @keyframes bannerIn {
-    from { transform: translate(-50%, -50%) scale(0) rotate(-12deg); opacity: 0; }
-    to { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
-  }
-  @keyframes bannerOut {
-    to { transform: translate(-50%, -50%) scale(0.9); opacity: 0; }
   }
 
   /* ============ LEADERBOARD (CAKE PODIUM) ============ */
@@ -715,9 +627,7 @@
   const CONFIG = {
     CHANNEL: 'asiandiva__',
     POP_COMMAND: '!pop',
-    BIRTHDAY_COMMAND: '!birthday',
     POP_COOLDOWN_MS: 4000,
-    BIRTHDAY_COOLDOWN_MS: 30000,
     MAX_BALLOONS: 18,                // max regular drifting balloons on screen
     SPAWN_MIN_MS: 800,               // shortest gap between spawns (0.8 sec)
     SPAWN_MAX_MS: 12000,             // longest gap between spawns (12 sec)
@@ -745,31 +655,7 @@
     // without anyone else interrupting. If someone else pops, the original
     // streak breaks and the new popper starts at x1.
     STREAK_IDLE_MS: 300000,          // 5 min of no pops at all → streak resets
-    STREAK_MIN_VISIBLE: 5,           // streak count needed to show the indicator
-
-    // ===== FLAIR (themed phrases that pop up randomly) =====
-    FLAIR_MIN_MS: 60000,             // shortest gap between flair (1 min)
-    FLAIR_MAX_MS: 600000,            // longest gap (10 min)
-    FLAIR_PHRASES: [
-      '🎈 POP POP POP!',
-      '🎂 Happy Birthday Diva!',
-      '✨ Make a wish ✨',
-      '🎁 You\'re the gift',
-      '🌟 Sparkle time',
-      '🎈 Float on',
-      '🎂 Cake o\'clock',
-      '🎉 Party in the chat',
-      '👑 Birthday Diva',
-      '✨ Magic moment',
-      '🎂 Make it count',
-      '💕 Pop with love',
-      '🎈 Today, we celebrate',
-      '🥳 Diva Squad on top',
-      '🎀 Sweetest day',
-      '🎈 Pop pop yay!',
-      '🌸 Bloom and pop',
-      '🎂 Wish granted'
-    ]
+    STREAK_MIN_VISIBLE: 5             // streak count needed to show the indicator
   };
 
   const COLORS = {
@@ -795,7 +681,6 @@
 
   const balloons = new Set();
   const popCooldowns = new Map();
-  const bdayCooldowns = new Map();
   const seenEventIds = new Set();
   const popStreak = {
     username: null,                  // lowercased username of current streaker
@@ -1203,91 +1088,6 @@
     }
   }
 
-  // ============ !BIRTHDAY CELEBRATION ============
-  function triggerBirthdayCelebration(displayName) {
-    const banner = document.createElement('div');
-    banner.className = 'bday-banner';
-    banner.innerHTML = `
-      <div class="bday-banner-title">🎂 Happy Birthday Diva! 🎂</div>
-      <div class="bday-banner-sub">from ${escapeHtml(displayName)}</div>
-    `;
-    document.body.appendChild(banner);
-    setTimeout(() => banner.remove(), 4400);
-
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
-    const palette = ['#ff6b9d', '#ffd700', '#5dc9c4', '#c5b6f7', '#ffaab5', '#a8e6cf', '#ff9ec7', '#fff'];
-    for (let burst = 0; burst < 3; burst++) {
-      setTimeout(() => burstParticles(cx, cy, palette, 40, true), burst * 200);
-    }
-    for (let i = 0; i < 6; i++) setTimeout(spawnBalloon, i * 200);
-  }
-
-  // ============ FLAIR (random themed phrases) ============
-  let lastFlairPhrase = '';
-
-  function showFlair() {
-    if (CONFIG.FLAIR_PHRASES.length === 0) return;
-
-    // Pick a phrase, avoiding immediate repeats
-    let phrase;
-    do {
-      phrase = CONFIG.FLAIR_PHRASES[Math.floor(Math.random() * CONFIG.FLAIR_PHRASES.length)];
-    } while (phrase === lastFlairPhrase && CONFIG.FLAIR_PHRASES.length > 1);
-    lastFlairPhrase = phrase;
-
-    // Pick a position — bias toward the bottom 40% so it's less likely to
-    // cover the face when the widget is overlaid on the camera, but allow
-    // some horizontal variety
-    const marginX = 160;
-    const x = marginX + Math.random() * (window.innerWidth - marginX * 2);
-    const yMin = window.innerHeight * 0.55;
-    const yMax = window.innerHeight - 120;
-    const y = yMin + Math.random() * (yMax - yMin);
-
-    // The phrase itself
-    const el = document.createElement('div');
-    el.className = 'flair';
-    el.textContent = phrase;
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
-    document.body.appendChild(el);
-
-    // Sparkle decorations placed around the text
-    const sparkleEmojis = ['✨', '⭐', '💫', '🌟'];
-    const sparkleCount = 6 + Math.floor(Math.random() * 3);
-    const sparkleEls = [];
-    for (let i = 0; i < sparkleCount; i++) {
-      const s = document.createElement('div');
-      s.className = 'flair-sparkle';
-      s.textContent = sparkleEmojis[Math.floor(Math.random() * sparkleEmojis.length)];
-      // Spread sparkles around the phrase in a rough oval
-      const angle = (Math.PI * 2 * i) / sparkleCount + Math.random() * 0.5;
-      const radiusX = 140 + Math.random() * 60;
-      const radiusY = 50 + Math.random() * 30;
-      s.style.left = (x + Math.cos(angle) * radiusX) + 'px';
-      s.style.top  = (y + Math.sin(angle) * radiusY) + 'px';
-      s.style.animationDelay = (Math.random() * 1.2) + 's';
-      document.body.appendChild(s);
-      sparkleEls.push(s);
-    }
-
-    // Cleanup after all animations complete
-    setTimeout(() => {
-      el.remove();
-      sparkleEls.forEach(s => s.remove());
-    }, 4800);
-  }
-
-  function scheduleNextFlair() {
-    const range = CONFIG.FLAIR_MAX_MS - CONFIG.FLAIR_MIN_MS;
-    const delay = CONFIG.FLAIR_MIN_MS + Math.random() * range;
-    setTimeout(() => {
-      showFlair();
-      scheduleNextFlair();
-    }, delay);
-  }
-
   // ============ LEADERBOARD RENDER ============
   function renderLeaderboard() {
     const entries = Object.entries(scores)
@@ -1379,8 +1179,6 @@
     const testUsers = ['Teresa', 'Luke', 'Awkward', 'Jax', 'BubbleTeaQ', 'Doc', 'Vino', 'Suze', 'VanishArmy'];
     const u = () => testUsers[Math.floor(Math.random() * testUsers.length)];
     if (e.key === 't' || e.key === 'T') spawnBalloon();
-    if (e.key === 'b' || e.key === 'B') triggerBirthdayCelebration('TestUser');
-    if (e.key === 'f' || e.key === 'F') showFlair();
     if (e.key === 'p' || e.key === 'P') {
       const name = u();
       const available = [...balloons].find(b => !b.classList.contains('popping') && b.parentNode);
@@ -1492,15 +1290,6 @@
 
     const displayName = tags['display-name'] || nick;
     const lowerMsg = message.toLowerCase();
-
-    if (lowerMsg === CONFIG.BIRTHDAY_COMMAND || lowerMsg.startsWith(CONFIG.BIRTHDAY_COMMAND + ' ')) {
-      const now = Date.now();
-      const last = bdayCooldowns.get(nick.toLowerCase()) || 0;
-      if (now - last < CONFIG.BIRTHDAY_COOLDOWN_MS) return;
-      bdayCooldowns.set(nick.toLowerCase(), now);
-      triggerBirthdayCelebration(displayName);
-      return;
-    }
 
     if (lowerMsg.startsWith(CONFIG.POP_COMMAND + ' ') || lowerMsg === CONFIG.POP_COMMAND) {
       const now = Date.now();
@@ -1640,8 +1429,8 @@
       scheduleNextSpawn();
     }, delay);
   }
-  scheduleNextSpawn();
-  scheduleNextFlair();
+  // Random drifting balloons disabled — widget is now donation-event-only.
+  // (scheduleNextSpawn function still exists below if we want to re-enable.)
 
   connectIRC();
   connectSSE();
