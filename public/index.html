@@ -634,6 +634,8 @@
     SPAWN_BURST_CHANCE: 0.3,         // 30% chance of spawning a 2nd balloon shortly after
     LEADERBOARD_TOP_N: 10,
     PERSIST_KEY: 'asiandiva_bday_balloon_scores_v2',
+    PENDING_VIPS_KEY: 'asiandiva_pending_vips_v1',  // unpopped VIPs across sessions
+    MAX_PENDING_VIPS: 50,                            // hard cap so storage can't grow forever
     SHOW_STATUS: false,
 
     // ===== VIP / EVENT CONFIG =====
@@ -690,6 +692,7 @@
     resetTimer: null
   };
   let scores = loadScores();
+  let pendingVIPs = loadPendingVIPs();
 
   // ============ SCORE PERSISTENCE ============
   function loadScores() {
@@ -709,6 +712,39 @@
     scores[key].count += points;
     saveScores();
     if (leaderboardEl.classList.contains('open')) renderLeaderboard();
+  }
+
+  // ============ VIP PERSISTENCE ============
+  // Unpopped VIP balloons are saved to localStorage so they survive OBS
+  // restarts, server redeploys, and overnight breaks. They'll respawn the
+  // next time the widget loads, exactly as they were.
+  function loadPendingVIPs() {
+    try {
+      const raw = localStorage.getItem(CONFIG.PENDING_VIPS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+  function savePendingVIPs() {
+    try {
+      // Soft cap — keep only the most recent N entries
+      if (pendingVIPs.length > CONFIG.MAX_PENDING_VIPS) {
+        pendingVIPs = pendingVIPs.slice(-CONFIG.MAX_PENDING_VIPS);
+      }
+      localStorage.setItem(CONFIG.PENDING_VIPS_KEY, JSON.stringify(pendingVIPs));
+    } catch {}
+  }
+  function addPendingVIP(data) {
+    pendingVIPs.push(data);
+    savePendingVIPs();
+  }
+  function removePendingVIP(vipId) {
+    pendingVIPs = pendingVIPs.filter(v => v.vipId !== vipId);
+    savePendingVIPs();
+  }
+  function clearPendingVIPs() {
+    pendingVIPs = [];
+    savePendingVIPs();
   }
 
   // ============ REGULAR BALLOON SPAWN ============
@@ -758,15 +794,24 @@
   }
 
   // ============ VIP BALLOON SPAWN ============
-  function spawnVIPBalloon(size, eventType, meta) {
-    const colorKey = COLOR_KEYS[Math.floor(Math.random() * COLOR_KEYS.length)];
+  // Optional opts:
+  //   opts.color   — override the random color (used when restoring from storage)
+  //   opts.vipId   — override the auto-generated ID (used when restoring)
+  //   opts.skipPersist — true when restoring from storage (avoids saving back)
+  function spawnVIPBalloon(size, eventType, meta, opts) {
+    opts = opts || {};
+    const colorKey = opts.color && COLORS[opts.color]
+      ? opts.color
+      : COLOR_KEYS[Math.floor(Math.random() * COLOR_KEYS.length)];
     const def = COLORS[colorKey];
+    const vipId = opts.vipId || ('vip_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8));
 
     const b = document.createElement('div');
     b.className = `balloon balloon-${colorKey} vip vip-${size}`;
     b.dataset.color = colorKey;
     b.dataset.vip = 'true';
     b.dataset.vipSize = size;
+    b.dataset.vipId = vipId;
     b.dataset.eventType = eventType;
     b.dataset.displayName = meta.displayName;
     b.style.setProperty('--color', def.color);
@@ -809,10 +854,17 @@
     stage.appendChild(b);
     balloons.add(b);
 
+    // Persist this VIP so it survives OBS restarts (unless we're already restoring)
+    if (!opts.skipPersist) {
+      addPendingVIP({ vipId, size, eventType, meta, color: colorKey });
+    }
+
     // Begin wandering after a frame so initial position is committed
     requestAnimationFrame(() => {
       requestAnimationFrame(() => moveVIPToRandomLocation(b));
     });
+
+    return vipId;
   }
 
   // ============ VIP WANDERING ============
@@ -931,6 +983,10 @@
                    : CONFIG.POINTS.vipRegular;
       const label = size === 'big' ? 'BIG VIP POP!' : 'VIP POP!';
       showCredit(cx, cy, popperName, points, true, label);
+
+      // Remove from persistent storage so it doesn't respawn next session
+      const vipId = balloon.dataset.vipId;
+      if (vipId) removePendingVIP(vipId);
     }
     // Regular pops: shrink animation only — no confetti, no credit text.
     // Score still updates silently (visible when leaderboard opens).
@@ -1216,6 +1272,20 @@
         renderLeaderboard();
       }
     }
+    // Shift+V — wipe all pending (unpopped) VIPs from storage AND screen.
+    // Use this if the queue gets too cluttered between streams.
+    if (e.key === 'v' || e.key === 'V') {
+      if (e.shiftKey) {
+        clearPendingVIPs();
+        [...balloons].forEach(b => {
+          if (b.dataset.vip === 'true' && b.parentNode) {
+            b.remove();
+            balloons.delete(b);
+          }
+        });
+        console.log('[VIP] All pending VIPs cleared.');
+      }
+    }
   });
 
   function toggleLeaderboard() {
@@ -1414,23 +1484,24 @@
   }
 
   // ============ START ============
-  // Spawning is intentionally unpredictable so balloons don't feel constant.
-  // Each schedule picks a fresh random delay between SPAWN_MIN_MS and
-  // SPAWN_MAX_MS, then occasionally spawns a quick follow-up balloon.
-  function scheduleNextSpawn() {
-    const range = CONFIG.SPAWN_MAX_MS - CONFIG.SPAWN_MIN_MS;
-    const delay = CONFIG.SPAWN_MIN_MS + Math.random() * range;
-    setTimeout(() => {
-      spawnBalloon();
-      // Occasionally fire a quick second balloon for variety
-      if (Math.random() < CONFIG.SPAWN_BURST_CHANCE) {
-        setTimeout(spawnBalloon, 600 + Math.random() * 1400);
-      }
-      scheduleNextSpawn();
-    }, delay);
-  }
   // Random drifting balloons disabled — widget is now donation-event-only.
-  // (scheduleNextSpawn function still exists below if we want to re-enable.)
+  // spawnBalloon() still exists for the T test hotkey but is never auto-called.
+
+  // Restore unpopped VIPs from previous sessions — stagger them so they
+  // don't all rise from the bottom at the exact same moment
+  if (pendingVIPs.length > 0) {
+    console.log(`[VIP] Restoring ${pendingVIPs.length} unpopped VIP(s) from last session`);
+    const saved = pendingVIPs.slice();   // snapshot so we don't double-trigger if anything mutates
+    saved.forEach((v, i) => {
+      setTimeout(() => {
+        spawnVIPBalloon(v.size, v.eventType, v.meta, {
+          color: v.color,
+          vipId: v.vipId,
+          skipPersist: true   // already in storage, don't double-save
+        });
+      }, i * 400);
+    });
+  }
 
   connectIRC();
   connectSSE();
