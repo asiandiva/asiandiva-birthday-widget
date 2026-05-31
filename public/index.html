@@ -714,7 +714,9 @@
     BIG_SPENDER: {
       ENABLED: true,
       MESSAGE: 'THANKS FOR THE MONEY SUCKER',
-      DURATION_MS: 5000
+      DURATION_MS: 5000,
+      SOUND: true,        // play a cha-ching when the banner fires
+      VOLUME: 0.4         // 0.0 – 1.0
     },
 
     POINTS: {
@@ -1105,6 +1107,53 @@
     }
   }
 
+  // ============ CHA-CHING SOUND ============
+  // Synthesized cash-register ring via Web Audio — no asset file needed.
+  // Browsers suspend audio until a user gesture; we prime the context on the
+  // first interaction (and OBS browser sources allow autoplay anyway).
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  ['keydown', 'pointerdown', 'click'].forEach(ev =>
+    window.addEventListener(ev, getAudioCtx, { once: true }));
+
+  function playChaChing() {
+    if (!CONFIG.BIG_SPENDER.SOUND) return;
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const vol = CONFIG.BIG_SPENDER.VOLUME;
+    const now = ctx.currentTime;
+
+    // Two ascending bell tones (D6 → G6) — the classic register "cha-CHING".
+    const notes = [
+      { freq: 1174.66, start: 0.0,  dur: 0.18 },
+      { freq: 1567.98, start: 0.09, dur: 0.55 }
+    ];
+    notes.forEach(n => {
+      // Each bell = two slightly detuned oscillators for a metallic shimmer.
+      [n.freq, n.freq * 2.01].forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = f;
+        const peak = vol * (i === 0 ? 1 : 0.3);
+        const t0 = now + n.start;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.dur);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + n.dur + 0.05);
+      });
+    });
+  }
+
   // ============ BIG SPENDER CALLOUT ============
   // Slams a full-screen banner on screen for the biggest donations, plus a
   // burst of money-green confetti. detail = what they did, e.g. "10 GIFTED SUBS".
@@ -1128,6 +1177,8 @@
       </div>`;
     document.body.appendChild(el);
     requestAnimationFrame(() => el.classList.add('show'));
+
+    playChaChing();
 
     // Money-green confetti rain across the upper screen
     const w = window.innerWidth;
