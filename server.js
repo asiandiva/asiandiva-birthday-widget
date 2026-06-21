@@ -253,18 +253,31 @@ async function refreshAccessToken(reason) {
   }
 }
 
-// Periodically re-validate and refresh before expiry so the token never lapses
-// mid-stream. setTimeout can't hold a 60-day delay, so we just check twice a day.
+// Self-rescheduling token renewal. Each run refreshes the access token and then
+// schedules the next run a bit before the new token's expiry — so it works
+// whether the token lasts a few hours (twitchtokengenerator's default) or weeks.
+// Refreshing slightly early is harmless; we just always get a fresh token.
 function scheduleTokenMaintenance() {
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(async () => {
+  if (!currentRefresh) return;  // no refresh token → nothing to schedule (manual mode)
+  if (refreshTimer) clearTimeout(refreshTimer);
+
+  const BUFFER_SEC = 30 * 60;        // renew ~30 min before expiry
+  const MIN_SEC = 5 * 60;            // never sooner than 5 min (avoids tight loops)
+  const MAX_SEC = 24 * 60 * 60;      // and at least once a day (setTimeout-safe)
+
+  let delaySec = MAX_SEC;
+  if (tokenInfo.valid && tokenInfo.expiresInSec != null) {
+    delaySec = Math.min(Math.max(tokenInfo.expiresInSec - BUFFER_SEC, MIN_SEC), MAX_SEC);
+  } else if (!tokenInfo.valid) {
+    delaySec = MIN_SEC;              // token already dead — retry soon
+  }
+
+  console.log(`[Token] ⏰ Next auto-refresh in ~${Math.round(delaySec / 60)} min`);
+  refreshTimer = setTimeout(async () => {
+    await refreshAccessToken('scheduled renewal');
     await validateToken();
-    const expiringSoon = tokenInfo.valid && tokenInfo.expiresInSec != null && tokenInfo.expiresInSec < 3 * 86400;
-    if ((!tokenInfo.valid || expiringSoon) && currentRefresh) {
-      const ok = await refreshAccessToken(tokenInfo.valid ? 'expiring soon' : 'token invalid');
-      if (ok) await validateToken();
-    }
-  }, 12 * 60 * 60 * 1000);  // every 12 hours
+    scheduleTokenMaintenance();     // reschedule based on the new token's expiry
+  }, delaySec * 1000);
 }
 
 function connectEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
