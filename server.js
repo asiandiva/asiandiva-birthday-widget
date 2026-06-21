@@ -19,6 +19,7 @@ const WebSocket = require('ws');
 const PORT = process.env.PORT || 3000;
 const CLIENT_ID = process.env.TWITCH_CLIENT_ID;
 const USER_TOKEN = process.env.TWITCH_USER_TOKEN;
+const REFRESH_TOKEN = process.env.TWITCH_REFRESH_TOKEN;  // optional — enables auto-refresh
 const BROADCASTER_ID = process.env.TWITCH_BROADCASTER_ID;
 const CHANNEL_NAME = (process.env.TWITCH_CHANNEL || 'asiandiva__').toLowerCase();
 const BLERP_BOT = (process.env.BLERP_BOT || 'blerp').toLowerCase();
@@ -30,6 +31,12 @@ const BLERP_BOT = (process.env.BLERP_BOT || 'blerp').toLowerCase();
 // only a fallback if validation can't run.
 let effectiveClientId = CLIENT_ID;
 let tokenInfo = { valid: null };
+
+// Live token state. The access token can be swapped out at runtime by the
+// auto-refresh flow, so everything reads `currentToken` rather than the env var.
+let currentToken = USER_TOKEN;
+let currentRefresh = REFRESH_TOKEN;
+let refreshTimer = null;
 
 if (!CLIENT_ID || !USER_TOKEN || !BROADCASTER_ID) {
   console.error('[FATAL] Missing required env vars: TWITCH_CLIENT_ID, TWITCH_USER_TOKEN, TWITCH_BROADCASTER_ID');
@@ -171,7 +178,7 @@ const SUBSCRIPTIONS = [
 async function validateToken() {
   try {
     const res = await fetch('https://id.twitch.tv/oauth2/validate', {
-      headers: { 'Authorization': `OAuth ${USER_TOKEN}` }
+      headers: { 'Authorization': `OAuth ${currentToken}` }
     });
 
     if (res.status !== 200) {
@@ -212,6 +219,52 @@ async function validateToken() {
     console.error('[Token] ❌ Validation error:', e.message);
     tokenInfo = { valid: false, error: e.message, checkedAt: new Date().toISOString() };
   }
+}
+
+// Exchange the refresh token for a fresh access token via twitchtokengenerator's
+// refresh API (it holds the client secret, so we don't need it here). Tokens not
+// generated on that site won't refresh this way — see TWITCH_REFRESH_TOKEN notes
+// in the README. Returns true if a new access token was obtained.
+async function refreshAccessToken(reason) {
+  if (!currentRefresh) {
+    console.warn('[Token] No TWITCH_REFRESH_TOKEN set — cannot auto-refresh. Add it in Render to enable hands-off renewal.');
+    return false;
+  }
+  try {
+    console.log(`[Token] 🔄 Refreshing access token (${reason})...`);
+    const res = await fetch(`https://twitchtokengenerator.com/api/refresh/${encodeURIComponent(currentRefresh)}`);
+    const data = await res.json().catch(() => ({}));
+
+    const newAccess = data.token || data.access_token;
+    const newRefresh = data.refresh || data.refresh_token;
+
+    if (res.status === 200 && data.success !== false && newAccess) {
+      currentToken = newAccess;
+      if (newRefresh) currentRefresh = newRefresh;  // use rotated refresh token if returned
+      console.log('[Token] ✅ Access token refreshed.');
+      return true;
+    }
+
+    console.error('[Token] ❌ Refresh failed:', data.message || data.error || JSON.stringify(data).slice(0, 200));
+    return false;
+  } catch (e) {
+    console.error('[Token] ❌ Refresh error:', e.message);
+    return false;
+  }
+}
+
+// Periodically re-validate and refresh before expiry so the token never lapses
+// mid-stream. setTimeout can't hold a 60-day delay, so we just check twice a day.
+function scheduleTokenMaintenance() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(async () => {
+    await validateToken();
+    const expiringSoon = tokenInfo.valid && tokenInfo.expiresInSec != null && tokenInfo.expiresInSec < 3 * 86400;
+    if ((!tokenInfo.valid || expiringSoon) && currentRefresh) {
+      const ok = await refreshAccessToken(tokenInfo.valid ? 'expiring soon' : 'token invalid');
+      if (ok) await validateToken();
+    }
+  }, 12 * 60 * 60 * 1000);  // every 12 hours
 }
 
 function connectEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
@@ -276,8 +329,9 @@ function connectEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
   });
 }
 
-async function subscribeAll() {
+async function subscribeAll(isRetry = false) {
   console.log(`[EventSub] Creating ${SUBSCRIPTIONS.length} subscriptions...`);
+  let saw401 = false;
   for (const sub of SUBSCRIPTIONS) {
     try {
       const body = {
@@ -291,7 +345,7 @@ async function subscribeAll() {
         method: 'POST',
         headers: {
           'Client-Id': effectiveClientId,
-          'Authorization': `Bearer ${USER_TOKEN}`,
+          'Authorization': `Bearer ${currentToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body)
@@ -310,7 +364,8 @@ async function subscribeAll() {
         });
         console.error(`  ❌ ${sub.type} → ${res.status}:`, json.message || json);
         if (res.status === 401) {
-          console.error('  ⚠️  TOKEN INVALID OR EXPIRED. Update TWITCH_USER_TOKEN env var.');
+          saw401 = true;
+          console.error('  ⚠️  TOKEN INVALID OR EXPIRED.');
         } else if (res.status === 403) {
           console.error('  ⚠️  Token lacks required scope for this event. Regenerate with bits:read + channel:read:subscriptions.');
         }
@@ -318,6 +373,16 @@ async function subscribeAll() {
     } catch (e) {
       failedSubscriptions.set(sub.type, { status: 'exception', message: e.message, at: new Date().toISOString() });
       console.error(`  ❌ ${sub.type} → exception:`, e.message);
+    }
+  }
+
+  // A 401 means the access token died — try a refresh and re-subscribe once.
+  if (saw401 && !isRetry && currentRefresh) {
+    const ok = await refreshAccessToken('401 during subscribe');
+    if (ok) {
+      await validateToken();
+      activeSubscriptions.clear();
+      return subscribeAll(true);
     }
   }
 
@@ -490,8 +555,16 @@ app.listen(PORT, () => {
 async function start() {
   // Validate first so we know the token's real client_id before subscribing.
   await validateToken();
+
+  // If the stored access token is dead but we have a refresh token, renew now.
+  if (!tokenInfo.valid && currentRefresh) {
+    const ok = await refreshAccessToken('startup — token invalid/expired');
+    if (ok) await validateToken();
+  }
+
   connectEventSub();
   connectIRC();
+  scheduleTokenMaintenance();  // keeps the token alive long-term (no-op without a refresh token)
 }
 
 start();

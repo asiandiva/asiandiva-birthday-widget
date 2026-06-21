@@ -61,12 +61,24 @@ The server needs a token with these scopes:
 - `user:read:chat` *(optional, only if you want to extend with chat scopes later)*
 
 Go to [twitchtokengenerator.com](https://twitchtokengenerator.com), pick
-**Custom Scope Token**, select the scopes above, generate, and copy the
-**access token** (not the refresh token).
+**Custom Scope Token**, select the scopes above, generate, and copy **both**
+the **access token** and the **refresh token**.
 
-> Note: user access tokens expire (~60 days). For a one-time birthday stream
-> you just need it valid on the day of. If it expires, generate a new one
-> and update the `TWITCH_USER_TOKEN` env var on Render.
+- `TWITCH_USER_TOKEN` ← the access token
+- `TWITCH_REFRESH_TOKEN` ← the refresh token (optional but recommended)
+
+> **Automatic renewal:** If you set `TWITCH_REFRESH_TOKEN`, the server renews
+> the access token by itself — on startup if it's expired, proactively before
+> it lapses, and reactively if Twitch returns a 401. Set it once and you never
+> have to regenerate tokens again. (This uses twitchtokengenerator's refresh
+> API, so it only works for tokens generated on that site.)
+>
+> Without a refresh token, access tokens expire (~60 days) and you'll need to
+> generate a new one and update `TWITCH_USER_TOKEN` on Render manually.
+>
+> **Note on client IDs:** the server auto-detects the token's real client ID
+> from Twitch, so `TWITCH_CLIENT_ID` no longer has to match the token's app —
+> a mismatch used to cause `401: Client ID and OAuth token do not match`.
 
 ### 2. Create a new GitHub repo and push
 
