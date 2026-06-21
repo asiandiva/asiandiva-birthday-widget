@@ -23,6 +23,14 @@ const BROADCASTER_ID = process.env.TWITCH_BROADCASTER_ID;
 const CHANNEL_NAME = (process.env.TWITCH_CHANNEL || 'asiandiva__').toLowerCase();
 const BLERP_BOT = (process.env.BLERP_BOT || 'blerp').toLowerCase();
 
+// The Client-Id sent to Twitch MUST belong to the same app the token was
+// issued for, or every call fails with "Client ID and OAuth token do not
+// match". Instead of trusting the env var, we ask Twitch which client_id the
+// token actually belongs to (see validateToken) and use that. The env value is
+// only a fallback if validation can't run.
+let effectiveClientId = CLIENT_ID;
+let tokenInfo = { valid: null };
+
 if (!CLIENT_ID || !USER_TOKEN || !BROADCASTER_ID) {
   console.error('[FATAL] Missing required env vars: TWITCH_CLIENT_ID, TWITCH_USER_TOKEN, TWITCH_BROADCASTER_ID');
   process.exit(1);
@@ -85,6 +93,7 @@ app.get('/health', (req, res) => {
     eventsub: eventSubState,
     irc: ircState,
     sseClients: sseClients.size,
+    token: tokenInfo,
     subscriptions: {
       active: [...activeSubscriptions],
       failed: failures,
@@ -155,6 +164,55 @@ const SUBSCRIPTIONS = [
   // messages via the IRC parser below. channel.bits.use was unreliable
   // for Blerp bit amounts last time.
 ];
+
+// Ask Twitch which client_id / scopes / account this token belongs to, then use
+// that client_id for all API calls so it always matches the token. Also surfaces
+// missing scopes and expiry in the logs and /health so problems are obvious.
+async function validateToken() {
+  try {
+    const res = await fetch('https://id.twitch.tv/oauth2/validate', {
+      headers: { 'Authorization': `OAuth ${USER_TOKEN}` }
+    });
+
+    if (res.status !== 200) {
+      const txt = await res.text().catch(() => '');
+      console.error(`[Token] ❌ Validation failed (${res.status}) — token is invalid or expired. Generate a new TWITCH_USER_TOKEN. ${txt}`);
+      tokenInfo = { valid: false, status: res.status, checkedAt: new Date().toISOString() };
+      return;
+    }
+
+    const data = await res.json();
+    effectiveClientId = data.client_id || CLIENT_ID;
+
+    const scopes = data.scopes || [];
+    const days = Math.round((data.expires_in || 0) / 86400);
+    tokenInfo = {
+      valid: true,
+      login: data.login,
+      clientId: data.client_id,
+      scopes,
+      expiresInSec: data.expires_in,
+      checkedAt: new Date().toISOString()
+    };
+
+    console.log(`[Token] ✅ Valid — account: ${data.login}, client_id: ${data.client_id}`);
+    console.log(`[Token]    scopes: ${scopes.join(', ') || '(none)'}`);
+    console.log(`[Token]    expires in ~${days} day(s)`);
+
+    if (CLIENT_ID && data.client_id && data.client_id !== CLIENT_ID) {
+      console.warn(`[Token] ⚠️  Token's client_id (${data.client_id}) differs from TWITCH_CLIENT_ID env (${CLIENT_ID}). Using the token's client_id so they match.`);
+    }
+
+    const needed = ['bits:read', 'channel:read:subscriptions'];
+    const missing = needed.filter(s => !scopes.includes(s));
+    if (missing.length) {
+      console.warn(`[Token] ⚠️  Missing scope(s): ${missing.join(', ')}. Regenerate the token with these enabled or those events won't fire.`);
+    }
+  } catch (e) {
+    console.error('[Token] ❌ Validation error:', e.message);
+    tokenInfo = { valid: false, error: e.message, checkedAt: new Date().toISOString() };
+  }
+}
 
 function connectEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -232,7 +290,7 @@ async function subscribeAll() {
       const res = await fetch('https://api.twitch.tv/helix/eventsub/subscriptions', {
         method: 'POST',
         headers: {
-          'Client-Id': CLIENT_ID,
+          'Client-Id': effectiveClientId,
           'Authorization': `Bearer ${USER_TOKEN}`,
           'Content-Type': 'application/json'
         },
@@ -429,5 +487,11 @@ app.listen(PORT, () => {
   console.log('');
 });
 
-connectEventSub();
-connectIRC();
+async function start() {
+  // Validate first so we know the token's real client_id before subscribing.
+  await validateToken();
+  connectEventSub();
+  connectIRC();
+}
+
+start();
