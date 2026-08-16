@@ -192,6 +192,11 @@ async function validateToken() {
     effectiveClientId = data.client_id || CLIENT_ID;
 
     const scopes = data.scopes || [];
+    // Twitch returns expires_in: 0 for tokens that never expire. Treating that
+    // as "expired" would send us into a refresh loop, and every refresh
+    // invalidates the token that created our EventSub subscriptions — which
+    // makes Twitch silently drop them. So track "never expires" explicitly.
+    const neverExpires = !data.expires_in;
     const days = Math.round((data.expires_in || 0) / 86400);
     tokenInfo = {
       valid: true,
@@ -199,12 +204,13 @@ async function validateToken() {
       clientId: data.client_id,
       scopes,
       expiresInSec: data.expires_in,
+      neverExpires,
       checkedAt: new Date().toISOString()
     };
 
     console.log(`[Token] ✅ Valid — account: ${data.login}, client_id: ${data.client_id}`);
     console.log(`[Token]    scopes: ${scopes.join(', ') || '(none)'}`);
-    console.log(`[Token]    expires in ~${days} day(s)`);
+    console.log(`[Token]    ${neverExpires ? 'does not expire' : `expires in ~${days} day(s)`}`);
 
     if (CLIENT_ID && data.client_id && data.client_id !== CLIENT_ID) {
       console.warn(`[Token] ⚠️  Token's client_id (${data.client_id}) differs from TWITCH_CLIENT_ID env (${CLIENT_ID}). Using the token's client_id so they match.`);
@@ -261,12 +267,25 @@ function scheduleTokenMaintenance() {
   if (!currentRefresh) return;  // no refresh token → nothing to schedule (manual mode)
   if (refreshTimer) clearTimeout(refreshTimer);
 
+  // A non-expiring token must never be refreshed on a timer: refreshing
+  // invalidates the old token, and Twitch drops every EventSub subscription
+  // created with it. Just re-validate daily to catch manual revocation.
+  if (tokenInfo.valid && tokenInfo.neverExpires) {
+    console.log('[Token] ⏰ Token does not expire — no auto-refresh needed. Re-checking daily.');
+    refreshTimer = setTimeout(async () => {
+      await validateToken();
+      if (!tokenInfo.valid) await renewAndResubscribe('token no longer valid');
+      scheduleTokenMaintenance();
+    }, 24 * 60 * 60 * 1000);
+    return;
+  }
+
   const BUFFER_SEC = 30 * 60;        // renew ~30 min before expiry
   const MIN_SEC = 5 * 60;            // never sooner than 5 min (avoids tight loops)
   const MAX_SEC = 24 * 60 * 60;      // and at least once a day (setTimeout-safe)
 
   let delaySec = MAX_SEC;
-  if (tokenInfo.valid && tokenInfo.expiresInSec != null) {
+  if (tokenInfo.valid && tokenInfo.expiresInSec) {
     delaySec = Math.min(Math.max(tokenInfo.expiresInSec - BUFFER_SEC, MIN_SEC), MAX_SEC);
   } else if (!tokenInfo.valid) {
     delaySec = MIN_SEC;              // token already dead — retry soon
@@ -274,10 +293,22 @@ function scheduleTokenMaintenance() {
 
   console.log(`[Token] ⏰ Next auto-refresh in ~${Math.round(delaySec / 60)} min`);
   refreshTimer = setTimeout(async () => {
-    await refreshAccessToken('scheduled renewal');
-    await validateToken();
+    await renewAndResubscribe('scheduled renewal');
     scheduleTokenMaintenance();     // reschedule based on the new token's expiry
   }, delaySec * 1000);
+}
+
+// Refreshing swaps in a new access token, and Twitch drops the EventSub
+// subscriptions that were created with the previous one. So any successful
+// refresh must be followed by reconnecting EventSub to recreate them.
+async function renewAndResubscribe(reason) {
+  const ok = await refreshAccessToken(reason);
+  if (!ok) return false;
+  await validateToken();
+  console.log('[Token] ↻ Reconnecting EventSub to recreate subscriptions with the new token...');
+  activeSubscriptions.clear();
+  try { twitchWs && twitchWs.close(); } catch {}   // 'close' handler reconnects + re-subscribes
+  return true;
 }
 
 function connectEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
@@ -578,6 +609,21 @@ async function start() {
   connectEventSub();
   connectIRC();
   scheduleTokenMaintenance();  // keeps the token alive long-term (no-op without a refresh token)
+  startSubscriptionWatchdog();
+}
+
+// Safety net: Twitch can silently drop subscriptions (e.g. if the token that
+// created them is invalidated) while the WebSocket still looks connected. That
+// leaves the widget dead with no error anywhere. Notice it and reconnect.
+function startSubscriptionWatchdog() {
+  setInterval(() => {
+    if (eventSubState !== 'connected') return;      // reconnect logic already handles this
+    if (activeSubscriptions.size > 0) return;       // healthy
+    if (failedSubscriptions.size > 0) return;       // real errors are already reported
+
+    console.warn('[EventSub] ⚠️  Connected but 0 active subscriptions — they were dropped. Reconnecting...');
+    try { twitchWs && twitchWs.close(); } catch {}  // 'close' handler reconnects + re-subscribes
+  }, 5 * 60 * 1000);  // every 5 minutes
 }
 
 start();
