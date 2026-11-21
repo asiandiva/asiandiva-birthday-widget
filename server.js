@@ -356,7 +356,28 @@ function connectEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
     }
 
     if (messageType === 'revocation') {
-      console.warn('[EventSub] Subscription revoked:', msg.payload.subscription.type, msg.payload.subscription.status);
+      // Revocation is PER SUBSCRIPTION TYPE — e.g. Twitch can kill the two
+      // channel.subscription.* subs (gifts/resubs) while channel.cheer keeps
+      // working. Logging alone left activeSubscriptions stale, so /health kept
+      // reporting them active and the widget went silently dead for those
+      // events. Record it accurately, then rebuild the subscriptions.
+      const revokedType = msg.payload.subscription.type;
+      const revokedStatus = msg.payload.subscription.status;
+      console.warn(`[EventSub] ⚠️  Subscription revoked: ${revokedType} (${revokedStatus})`);
+
+      activeSubscriptions.delete(revokedType);
+      failedSubscriptions.set(revokedType, {
+        status: 'revoked',
+        message: revokedStatus,
+        at: new Date().toISOString()
+      });
+
+      if (revokedStatus === 'authorization_revoked' || revokedStatus === 'user_removed') {
+        console.error('  ⚠️  Twitch revoked authorization for this event. The token no longer grants it — regenerate TWITCH_USER_TOKEN with bits:read + channel:read:subscriptions.');
+      }
+
+      console.log('[EventSub] ↻ Reconnecting to rebuild subscriptions...');
+      try { twitchWs && twitchWs.close(); } catch {}  // 'close' handler reconnects + re-subscribes
       return;
     }
   });
@@ -618,10 +639,18 @@ async function start() {
 function startSubscriptionWatchdog() {
   setInterval(() => {
     if (eventSubState !== 'connected') return;      // reconnect logic already handles this
-    if (activeSubscriptions.size > 0) return;       // healthy
-    if (failedSubscriptions.size > 0) return;       // real errors are already reported
+    if (activeSubscriptions.size >= SUBSCRIPTIONS.length) return;   // all present — healthy
 
-    console.warn('[EventSub] ⚠️  Connected but 0 active subscriptions — they were dropped. Reconnecting...');
+    // PARTIAL loss counts too: a revoked channel.subscription.gift kills gift
+    // balloons while cheers still work, which is easy to miss. Only a full set
+    // is healthy. Skip types that failed for a reason already reported (e.g.
+    // a 403 scope error), since reconnecting won't fix those.
+    const missing = SUBSCRIPTIONS
+      .map(s => s.type)
+      .filter(t => !activeSubscriptions.has(t) && !failedSubscriptions.has(t));
+    if (missing.length === 0) return;
+
+    console.warn(`[EventSub] ⚠️  Connected but missing ${missing.length} subscription(s): ${missing.join(', ')}. Reconnecting...`);
     try { twitchWs && twitchWs.close(); } catch {}  // 'close' handler reconnects + re-subscribes
   }, 5 * 60 * 1000);  // every 5 minutes
 }
